@@ -4,33 +4,145 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, CreditCard, CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import { ArrowLeft, CreditCard, CheckCircle2, AlertTriangle, X, RefreshCw } from 'lucide-react';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
+
+interface UserProfile {
+  companyName?: string;
+  email?: string;
+  planTier?: string;
+  maxWorkers?: number;
+  subscriptionId?: string;
+  subscriptionStatus?: string;
+}
 
 export default function SettingsPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [companyName, setCompanyName] = useState('');
   const [activeTab, setActiveTab] = useState<'profile' | 'billing'>('billing');
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [canceling, setCanceling] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
 
-  // Auth Guard: Redirect unauthenticated users after session finishes loading
+  // Auth Guard
   useEffect(() => {
     if (!loading && !user) {
       router.push('/login');
     }
   }, [user, loading, router]);
 
+  // Fetch real-time user profile from Firestore
+  useEffect(() => {
+    if (!user) return;
+
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userDocRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data() as UserProfile;
+        setProfile(data);
+        if (data.companyName) {
+          setCompanyName(data.companyName);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const handleSaveProfile = async () => {
+    if (!user) return;
+    setSavingProfile(true);
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        companyName,
+      });
+      alert('Profile updated successfully!');
+    } catch (err) {
+      console.error('Error updating profile:', err);
+      alert('Failed to update company name.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   const handleCancelSubscription = async () => {
+    if (!user || !profile?.subscriptionId) {
+      alert('No active subscription ID found to cancel.');
+      return;
+    }
+
     setCanceling(true);
     try {
-      // Future Stripe Webhook / Firestore status update logic goes here
-      alert('Subscription cancellation request submitted.');
+      const res = await fetch('/api/cancel-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscriptionId: profile.subscriptionId,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to cancel subscription.');
+
+      // Update local Firestore status to reflecting canceling state
+      await updateDoc(doc(db, 'users', user.uid), {
+        subscriptionStatus: 'canceling',
+      });
+
+      alert('Your subscription has been scheduled for cancellation at the end of the billing period.');
       setShowCancelModal(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error canceling subscription:', err);
+      alert(err.message || 'An error occurred while canceling.');
     } finally {
       setCanceling(false);
+    }
+  };
+
+  const handleResumeSubscription = async () => {
+    if (!user || !profile?.subscriptionId) {
+      alert('No active subscription ID found to resume.');
+      return;
+    }
+
+    setResuming(true);
+    try {
+      const res = await fetch('/api/resume-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscriptionId: profile.subscriptionId,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to resume subscription.');
+
+      // Update local Firestore status back to active
+      await updateDoc(doc(db, 'users', user.uid), {
+        subscriptionStatus: 'active',
+      });
+
+      alert('Your subscription has been successfully reactivated!');
+    } catch (err: any) {
+      console.error('Error resuming subscription:', err);
+      alert(err.message || 'An error occurred while resuming.');
+    } finally {
+      setResuming(false);
+    }
+  };
+
+  const getTierPrice = (tier?: string) => {
+    switch (tier?.toLowerCase()) {
+      case 'standard crew': return '$49';
+      case 'crew pro': return '$79';
+      case 'multi-crew enterprise': return '$149';
+      default: return '$49';
     }
   };
 
@@ -41,6 +153,10 @@ export default function SettingsPage() {
       </div>
     );
   }
+
+  const currentPlan = profile?.planTier || 'Standard Crew';
+  const subscriptionStatus = profile?.subscriptionStatus || 'active';
+  const isCanceled = subscriptionStatus === 'canceled' || subscriptionStatus === 'canceling';
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
@@ -100,7 +216,7 @@ export default function SettingsPage() {
             onClick={() => setActiveTab('billing')}
             className={`pb-3 px-4 text-sm font-semibold transition border-b-2 ${
               activeTab === 'billing' 
-                ? 'border-blue-500 text-blue-400' 
+                ? 'border-emerald-500 text-emerald-400' 
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -110,7 +226,7 @@ export default function SettingsPage() {
             onClick={() => setActiveTab('profile')}
             className={`pb-3 px-4 text-sm font-semibold transition border-b-2 ${
               activeTab === 'profile' 
-                ? 'border-blue-500 text-blue-400' 
+                ? 'border-emerald-500 text-emerald-400' 
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -124,41 +240,54 @@ export default function SettingsPage() {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
                 <div>
-                  <span className="inline-flex items-center space-x-1.5 bg-blue-950 text-blue-400 border border-blue-800/60 text-xs px-3 py-1 rounded-full font-semibold mb-3">
+                  <span className={`inline-flex items-center space-x-1.5 ${isCanceled ? 'bg-amber-950/80 text-amber-400 border-amber-800/60' : 'bg-emerald-950 text-emerald-400 border-emerald-800/60'} border text-xs px-3 py-1 rounded-full font-semibold mb-3`}>
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Active Trial</span>
+                    <span className="capitalize">{isCanceled ? 'Subscription Canceling' : 'Active Subscription'}</span>
                   </span>
-                  <h2 className="text-xl font-bold text-white">Crew Pro Plan</h2>
+                  <h2 className="text-xl font-bold text-white">{currentPlan}</h2>
                   <p className="text-sm text-slate-400 mt-1">
-                    Includes up to 10 active workers, automated compliance checking, and document vault.
+                    Includes up to {profile?.maxWorkers === 999 ? 'Unlimited' : profile?.maxWorkers || 10} active workers and compliance tracking.
                   </p>
                 </div>
                 <div className="text-right">
-                  <div className="text-2xl font-extrabold text-white">$49<span className="text-sm font-normal text-slate-400">/mo</span></div>
-                  <span className="text-xs text-slate-500">Billed monthly after trial</span>
+                  <div className="text-2xl font-extrabold text-white">{getTierPrice(currentPlan)}<span className="text-sm font-normal text-slate-400">/mo</span></div>
+                  <span className="text-xs text-slate-500">Billed monthly via Stripe</span>
                 </div>
               </div>
 
               <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <p className="text-xs text-slate-400">
-                  Your 14-day free trial is active. You won&apos;t be charged until your trial ends.
+                  {isCanceled
+                    ? 'Your subscription is scheduled to end at the conclusion of the billing cycle.'
+                    : 'Manage your plan limits or change tier settings.'}
                 </p>
                 
                 <div className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-3 w-full sm:w-auto">
                   <button 
-                    onClick={() => alert("Stripe Checkout integration will launch here!")}
-                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 transition flex items-center justify-center space-x-2"
+                    onClick={() => router.push('/signup')}
+                    className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center justify-center space-x-2 shadow-lg shadow-emerald-500/20"
                   >
                     <CreditCard className="w-4 h-4" />
-                    <span>Upgrade / Manage Payment</span>
+                    <span>Change Tier</span>
                   </button>
 
-                  <button 
-                    onClick={() => setShowCancelModal(true)}
-                    className="w-full sm:w-auto bg-slate-950 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-900/50 text-slate-400 hover:text-rose-300 font-semibold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center"
-                  >
-                    Cancel Subscription
-                  </button>
+                  {isCanceled ? (
+                    <button 
+                      onClick={handleResumeSubscription}
+                      disabled={resuming}
+                      className="w-full sm:w-auto bg-emerald-950 hover:bg-emerald-900 border border-emerald-700/80 text-emerald-400 font-semibold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${resuming ? 'animate-spin' : ''}`} />
+                      <span>{resuming ? 'Resuming...' : 'Resume Subscription'}</span>
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => setShowCancelModal(true)}
+                      className="w-full sm:w-auto bg-slate-950 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-900/50 text-slate-400 hover:text-rose-300 font-semibold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center"
+                    >
+                      Cancel Subscription
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -178,8 +307,9 @@ export default function SettingsPage() {
                 </label>
                 <input 
                   type="text" 
-                  defaultValue="Farina Electric, Inc." 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                  value={companyName}
+                  onChange={(e) => setCompanyName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
                 />
               </div>
               <div>
@@ -188,7 +318,7 @@ export default function SettingsPage() {
                 </label>
                 <input 
                   type="email" 
-                  defaultValue={user?.email || 'joe@farinaelectric.com'} 
+                  value={user?.email || ''} 
                   disabled
                   className="w-full bg-slate-950/50 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-500 cursor-not-allowed"
                 />
@@ -196,10 +326,11 @@ export default function SettingsPage() {
             </div>
             <div className="pt-4 flex justify-end">
               <button 
-                onClick={() => alert("Profile updated successfully!")}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl transition"
+                onClick={handleSaveProfile}
+                disabled={savingProfile}
+                className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl transition disabled:opacity-50"
               >
-                Save Changes
+                {savingProfile ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>

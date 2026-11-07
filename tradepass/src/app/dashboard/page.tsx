@@ -10,7 +10,8 @@ import {
   Clock, 
   Search,
   Upload,
-  X
+  X,
+  ShieldAlert
 } from 'lucide-react';
 import { collection, addDoc, doc, onSnapshot, query, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -20,6 +21,7 @@ interface UserProfile {
   companyName?: string;
   planTier?: string;
   maxWorkers?: number;
+  subscriptionStatus?: string;
 }
 
 interface Worker {
@@ -52,7 +54,7 @@ export default function DashboardPage() {
     }
   }, [user, loading, router]);
 
-  // Fetch User Profile Document dynamically
+  // Fetch User Profile Document dynamically from Firestore
   useEffect(() => {
     if (!user) return;
 
@@ -83,12 +85,30 @@ export default function DashboardPage() {
   }, [user]);
 
   const companyName = profile?.companyName || user?.displayName || 'My Company';
-  const planTier = profile?.planTier || 'Crew Pro';
-  const maxWorkers = profile?.maxWorkers || 10;
+  const planTier = profile?.planTier || 'Standard Crew';
+  
+  // Dynamic max workers mapping based on plan tier
+  const getMaxWorkersLimit = (tier?: string) => {
+    switch (tier?.toLowerCase()) {
+      case 'standard crew': return 10;
+      case 'crew pro': return 25;
+      case 'multi-crew enterprise': return 999; // Unlimited
+      default: return profile?.maxWorkers || 10;
+    }
+  };
+
+  const maxWorkers = getMaxWorkersLimit(planTier);
+  const totalActive = workers.length;
+  const isAtCapacity = totalActive >= maxWorkers;
 
   const handleAddWorker = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !workerName) return;
+
+    if (isAtCapacity) {
+      alert(`You have reached your ${planTier} limit of ${maxWorkers} workers. Please upgrade your plan to add more.`);
+      return;
+    }
 
     try {
       setSubmitting(true);
@@ -116,7 +136,6 @@ export default function DashboardPage() {
     w.role.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const totalActive = workers.length;
   const compliantCount = workers.filter(w => w.status === 'Compliant').length;
   const warningCount = workers.filter(w => w.status === 'Warning').length;
   const expiredCount = workers.filter(w => w.status === 'Expired').length;
@@ -150,10 +169,12 @@ export default function DashboardPage() {
           <article className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
             <header className="flex items-center justify-between text-slate-400 mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider">Active Crew</span>
-              <Users className="w-5 h-5 text-blue-400" />
+              <Users className="w-5 h-5 text-emerald-400" />
             </header>
-            <div className="text-3xl font-extrabold text-white">{totalActive} / {maxWorkers}</div>
-            <span className="text-xs text-slate-500 mt-1 block">{planTier} Plan</span>
+            <div className="text-3xl font-extrabold text-white">
+              {totalActive} <span className="text-lg text-slate-500 font-normal">/ {maxWorkers === 999 ? '∞' : maxWorkers}</span>
+            </div>
+            <span className="text-xs text-slate-500 mt-1 block capitalize">{planTier} Plan</span>
           </article>
 
           <article className="bg-slate-900 p-5 rounded-2xl border border-slate-800">
@@ -184,6 +205,22 @@ export default function DashboardPage() {
           </article>
         </section>
 
+        {/* Capacity Warning Banner if full */}
+        {isAtCapacity && (
+          <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between text-amber-400 text-sm">
+            <div className="flex items-center space-x-3">
+              <ShieldAlert className="w-5 h-5 flex-shrink-0" />
+              <span>You have reached your worker limit ({maxWorkers} workers) on the {planTier} plan. Upgrade your tier to add more crew members.</span>
+            </div>
+            <button 
+              onClick={() => router.push('/signup')}
+              className="bg-amber-500 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-xs hover:bg-amber-400 transition"
+            >
+              Upgrade Plan
+            </button>
+          </div>
+        )}
+
         {/* Roster Controls */}
         <section className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
           <div className="relative w-full sm:w-80">
@@ -193,13 +230,13 @@ export default function DashboardPage() {
               placeholder="Search crew members..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"
             />
           </div>
 
           <button 
             onClick={() => setShowUploadModal(true)}
-            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm px-4 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 flex items-center justify-center space-x-2 transition"
+            className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-500/20 flex items-center justify-center space-x-2 transition"
           >
             <Plus className="w-4 h-4" />
             <span>Add Worker & Document</span>
@@ -258,7 +295,7 @@ export default function DashboardPage() {
                       <td className="px-6 py-4 text-right">
                         <button 
                           onClick={() => alert(`Viewing documents for ${worker.name}`)}
-                          className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition"
+                          className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition"
                         >
                           View Details →
                         </button>
@@ -296,7 +333,7 @@ export default function DashboardPage() {
                     placeholder="e.g. Marcus Vance"
                     value={workerName}
                     onChange={(e) => setWorkerName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
 
@@ -310,11 +347,11 @@ export default function DashboardPage() {
                     placeholder="e.g. Journeyman Electrician"
                     value={workerRole}
                     onChange={(e) => setWorkerRole(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
 
-                <div className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-6 text-center cursor-pointer transition bg-slate-950/50">
+                <div className="border-2 border-dashed border-slate-700 hover:border-emerald-500 rounded-xl p-6 text-center cursor-pointer transition bg-slate-950/50">
                   <Upload className="w-7 h-7 text-slate-400 mx-auto mb-2" />
                   <p className="text-xs text-slate-300 font-medium">Click to select PDF or image file</p>
                   <p className="text-[10px] text-slate-500 mt-0.5">License, Insurance Binder, or OSHA Card</p>
@@ -323,7 +360,7 @@ export default function DashboardPage() {
                 <button 
                   type="submit"
                   disabled={submitting}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3 rounded-xl text-xs transition disabled:opacity-50 shadow-lg shadow-emerald-500/20"
                 >
                   {submitting ? 'Saving to Cloud...' : 'Confirm & Save Worker'}
                 </button>
