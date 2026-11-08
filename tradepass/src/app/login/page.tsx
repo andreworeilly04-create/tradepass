@@ -27,7 +27,11 @@ export default function LoginPage() {
       router.push('/dashboard');
     } catch (err: any) {
       // Format friendly error messages for common Firebase auth failures
-      if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+      if (
+        err.code === 'auth/invalid-credential' ||
+        err.code === 'auth/user-not-found' ||
+        err.code === 'auth/wrong-password'
+      ) {
         setError('Invalid email or password. Please try again.');
       } else {
         setError(err.message || 'Failed to sign in. Please check your credentials.');
@@ -60,7 +64,7 @@ export default function LoginPage() {
         <p className="mt-2 text-sm text-slate-400">
           Need a TradePass account?{' '}
           <Link href="/signup" className="font-semibold text-blue-400 hover:text-blue-300 transition">
-            Start 14-day trial
+            Subscribe
           </Link>
         </p>
       </header>
