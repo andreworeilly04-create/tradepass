@@ -17,7 +17,7 @@ export default function HomePage() {
       
       {/* Hero Section */}
       <section className="px-6 pt-20 pb-16 md:pt-28 md:pb-24 max-w-7xl mx-auto text-center" aria-labelledby="hero-heading">
-        <div className="inline-flex items-center space-x-2 bg-emerald-950/60 border border-emerald-800/60 rounded-full px-4 py-1.5 mb-8 text-xs font-semibold text-emerald-400 tracking-wide uppercase">
+        <div className="inline-flex items-center space-x-2 bg-blue-950/60 border border-blue-800/60 rounded-full px-4 py-1.5 mb-8 text-xs font-semibold text-blue-400 tracking-wide uppercase">
           <AlertTriangle className="w-4 h-4 text-amber-400" />
           <span>Prevent Expensive Job-Site Shutdowns</span>
         </div>
@@ -33,7 +33,7 @@ export default function HomePage() {
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
           <Link 
             href="/signup"
-            className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-base px-8 py-4 rounded-xl shadow-xl shadow-emerald-500/20 transition"
+            className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-base px-8 py-4 rounded-xl shadow-xl shadow-blue-900/20 transition"
           >
             <span>Subscribe & Get Started</span>
             <ArrowRight className="w-5 h-5" />
@@ -61,7 +61,7 @@ export default function HomePage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
-              <div className="bg-emerald-500/10 p-3 rounded-xl w-fit text-emerald-400 mb-4 border border-emerald-500/20">
+              <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
                 <BellRing className="w-6 h-6" />
               </div>
               <h3 className="text-lg font-semibold text-white">Automated SMS & Email Alerts</h3>
@@ -71,7 +71,7 @@ export default function HomePage() {
             </article>
 
             <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
-              <div className="bg-emerald-500/10 p-3 rounded-xl w-fit text-emerald-400 mb-4 border border-emerald-500/20">
+              <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
                 <Smartphone className="w-6 h-6" />
               </div>
               <h3 className="text-lg font-semibold text-white">1-Click GC Passport Link</h3>
@@ -81,7 +81,7 @@ export default function HomePage() {
             </article>
 
             <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
-              <div className="bg-emerald-500/10 p-3 rounded-xl w-fit text-emerald-400 mb-4 border border-emerald-500/20">
+              <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
                 <FileCheck className="w-6 h-6" />
               </div>
               <h3 className="text-lg font-semibold text-white">Secure Cloud Storage</h3>
@@ -113,15 +113,15 @@ export default function HomePage() {
               </div>
               <ul className="mt-8 space-y-4 text-sm text-slate-300">
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Up to 10 Worker Profiles</span>
                 </li>
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Automated 30-Day Expiration Alerts</span>
                 </li>
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Instant GC Passport Links</span>
                 </li>
               </ul>
@@ -135,8 +135,8 @@ export default function HomePage() {
           </article>
 
           {/* Tier 2: Crew Pro (Featured) */}
-          <article className="bg-slate-900 p-8 rounded-2xl border-2 border-emerald-500 relative flex flex-col justify-between shadow-2xl shadow-emerald-950/30">
-            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-emerald-500 text-slate-950 text-xs font-extrabold px-3 py-1 rounded-full uppercase tracking-wider">
+          <article className="bg-slate-900 p-8 rounded-2xl border-2 border-blue-500 relative flex flex-col justify-between shadow-2xl shadow-blue-950/30">
+            <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-extrabold px-3 py-1 rounded-full uppercase tracking-wider">
               Most Popular
             </div>
             <div>
@@ -148,26 +148,26 @@ export default function HomePage() {
               </div>
               <ul className="mt-8 space-y-4 text-sm text-slate-300">
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Up to 25 Workers</span>
                 </li>
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Priority 30/15/7-Day SMS Warnings</span>
                 </li>
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Unlimited Document Vault Storage</span>
                 </li>
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Shareable GC Public Passport Link</span>
                 </li>
               </ul>
             </div>
             <Link 
               href="/signup?tier=pro"
-              className="mt-8 w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3 rounded-xl text-center shadow-lg transition block"
+              className="mt-8 w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-center shadow-lg transition block"
             >
               Subscribe Now
             </Link>
@@ -184,19 +184,19 @@ export default function HomePage() {
               </div>
               <ul className="mt-8 space-y-4 text-sm text-slate-300">
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Unlimited Workers & Staff</span>
                 </li>
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Multiple Foreman Accounts</span>
                 </li>
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Priority Support & Onboarding</span>
                 </li>
                 <li className="flex items-center space-x-3">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <CheckCircle2 className="w-4 h-4 text-blue-400" />
                   <span>Custom Company Branding on Passports</span>
                 </li>
               </ul>

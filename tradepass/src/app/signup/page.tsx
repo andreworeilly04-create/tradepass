@@ -52,6 +52,13 @@ const TIERS = [
   },
 ];
 
+interface UserProfile {
+  companyName?: string;
+  email?: string;
+  planTier?: string;
+  subscriptionId?: string;
+}
+
 function CheckoutForm({ clientSecret, tierName, onBack }: { clientSecret: string; tierName: string; onBack: () => void }) {
   const stripe = useStripe();
   const elements = useElements();
@@ -103,15 +110,16 @@ function CheckoutForm({ clientSecret, tierName, onBack }: { clientSecret: string
       <button
         type="submit"
         disabled={!stripe || loading}
-        className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3 rounded-xl transition disabled:opacity-50 shadow-lg shadow-emerald-500/20"
+        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 shadow-lg shadow-blue-900/20"
       >
-        {loading ? 'Processing Payment...' : 'Confirm Tier Change'}
+        {loading ? 'Processing Payment...' : 'Confirm Plan & Activate'}
       </button>
     </form>
   );
 }
 
 export default function SignupPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const tierParam = searchParams.get('tier');
 
@@ -129,19 +137,20 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isLoggedInUser, setIsLoggedInUser] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
-  // Pre-fill info if user is already logged in (e.g. clicking "Change Tier" from Settings)
+  // Detect logged-in user state & pre-fill account profile
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       if (currentUser) {
         setIsLoggedInUser(true);
         setEmail(currentUser.email || '');
-        
-        // Fetch company name from Firestore profile
+
         const userDocRef = doc(db, 'users', currentUser.uid);
         const userSnap = await getDoc(userDocRef);
         if (userSnap.exists()) {
-          const data = userSnap.data();
+          const data = userSnap.data() as UserProfile;
+          setProfile(data);
           if (data.companyName) {
             setCompanyName(data.companyName);
           }
@@ -164,13 +173,13 @@ export default function SignupPage() {
     try {
       let uid = auth.currentUser?.uid;
 
-      // 1. If user is brand new, create their Firebase Auth account first
+      // 1. Create Firebase Auth user if brand new
       if (!uid) {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         uid = userCredential.user.uid;
       }
 
-      // 2. Call backend API to create or update Stripe Subscription
+      // 2. Execute API route (Handles both new signup & updating existing subscription)
       const res = await fetch('/api/create-subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -179,13 +188,14 @@ export default function SignupPage() {
           companyName,
           priceId: selectedPriceId,
           uid,
+          subscriptionId: profile?.subscriptionId,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
-      // 3. Save or update user profile doc in Firestore
+      // 3. Update or set user document limits in Firestore
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
       const tierNameObj = TIERS.find(t => t.id === selectedPriceId)?.name || 'Standard Crew';
 
@@ -199,8 +209,14 @@ export default function SignupPage() {
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      // 4. Set client secret to render Stripe Payment Element
-      setClientSecret(data.clientSecret);
+      // 4. Always display the Stripe Payment Element form if a clientSecret is returned
+      if (data.clientSecret) {
+        setClientSecret(data.clientSecret);
+        return;
+      }
+
+      // Fallback redirect if no payment is required
+      router.push('/dashboard');
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -228,7 +244,7 @@ export default function SignupPage() {
                 {isLoggedInUser ? 'Change Subscription Tier' : 'Secure Your Job-Site'}
               </h1>
               <p className="text-sm text-slate-400">
-                {isLoggedInUser ? 'Select your new plan tier below.' : 'Choose your crew tier and create your TradePass account.'}
+                {isLoggedInUser ? 'Select your new plan tier below. Card re-verification is required.' : 'Choose your crew tier and create your TradePass account.'}
               </p>
             </div>
 
@@ -243,7 +259,7 @@ export default function SignupPage() {
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
                   placeholder="Vance Electric LLC"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
 
@@ -256,7 +272,7 @@ export default function SignupPage() {
                   disabled={isLoggedInUser}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="vance@electric.com"
-                  className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 ${isLoggedInUser ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 ${isLoggedInUser ? 'opacity-60 cursor-not-allowed' : ''}`}
                 />
               </div>
 
@@ -269,7 +285,7 @@ export default function SignupPage() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
               )}
@@ -281,21 +297,21 @@ export default function SignupPage() {
                     key={tier.id}
                     onClick={() => setSelectedPriceId(tier.id)}
                     className={`p-4 rounded-xl border cursor-pointer transition ${
-                      selectedPriceId === tier.id ? 'border-emerald-500 bg-emerald-500/10' : 'border-slate-800 bg-slate-950 hover:border-slate-700'
+                      selectedPriceId === tier.id ? 'border-blue-500 bg-blue-950/40' : 'border-slate-800 bg-slate-950 hover:border-slate-700'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <span className="font-bold text-white text-sm">{tier.name}</span>
-                        <span className="text-emerald-400 font-extrabold text-sm ml-2">{tier.price}<span className="text-slate-400 text-xs font-normal">/mo</span></span>
+                        <span className="text-blue-400 font-extrabold text-sm ml-2">{tier.price}<span className="text-slate-400 text-xs font-normal">/mo</span></span>
                       </div>
-                      {selectedPriceId === tier.id && <Check className="w-5 h-5 text-emerald-400" />}
+                      {selectedPriceId === tier.id && <Check className="w-5 h-5 text-blue-400" />}
                     </div>
                     
                     <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2 border-t border-slate-800/60 text-xs text-slate-300">
                       {tier.features.map((feature, idx) => (
                         <li key={idx} className="flex items-center space-x-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                          <CheckCircle2 className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
                           <span>{feature}</span>
                         </li>
                       ))}
@@ -307,9 +323,9 @@ export default function SignupPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-3 rounded-xl text-sm transition disabled:opacity-50 mt-4 shadow-lg shadow-emerald-500/20"
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition disabled:opacity-50 mt-4 shadow-lg shadow-blue-900/20"
               >
-                {loading ? 'Processing...' : isLoggedInUser ? 'Proceed to Payment' : 'Continue to Payment'}
+                {loading ? 'Processing...' : isLoggedInUser ? 'Proceed to Payment Verification' : 'Continue to Payment'}
               </button>
             </form>
           </>

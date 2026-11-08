@@ -89,7 +89,6 @@ export default function SettingsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to cancel subscription.');
 
-      // Update local Firestore status to reflecting canceling state
       await updateDoc(doc(db, 'users', user.uid), {
         subscriptionStatus: 'canceling',
       });
@@ -123,7 +122,6 @@ export default function SettingsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to resume subscription.');
 
-      // Update local Firestore status back to active
       await updateDoc(doc(db, 'users', user.uid), {
         subscriptionStatus: 'active',
       });
@@ -161,35 +159,6 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       
-      {/* Navigation Header */}
-      <header className="bg-slate-900 border-b border-slate-800 px-6 py-3">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <Link href="/dashboard" className="flex items-center space-x-3">
-            <div className="relative w-10 h-10 flex items-center justify-center">
-              <Image 
-                src="/TradePass logo.png" 
-                alt="TradePass Logo" 
-                width={40} 
-                height={40}
-                className="object-contain"
-                priority
-              />
-            </div>
-            <span className="font-extrabold text-lg text-white tracking-tight">
-              TradePass
-            </span>
-          </Link>
-
-          <Link
-            href="/dashboard"
-            className="bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 font-semibold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-2 transition"
-          >
-            <ArrowLeft className="w-4 h-4 text-slate-400" />
-            <span>Dashboard</span>
-          </Link>
-        </div>
-      </header>
-
       {/* Main Container */}
       <main className="max-w-5xl mx-auto px-6 py-8 w-full flex-grow">
         
