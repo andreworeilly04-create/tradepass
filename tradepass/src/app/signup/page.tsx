@@ -20,7 +20,7 @@ const TIERS = [
     workers: 'Up to 10 workers',
     features: [
       'Up to 10 Worker Profiles',
-      'Automated 30-Day Expiration Alerts',
+      'Automated 30 & 15-Day Email Alerts',
       'Instant GC Passport Links',
       'Secure Cloud Document Storage'
     ]
@@ -33,8 +33,8 @@ const TIERS = [
     popular: true,
     features: [
       'Up to 25 Workers',
-      'Priority 30/15/7-Day SMS Warnings',
-      'Unlimited Document Vault Storage',
+      'Automated 30, 15, 7, & 1-Day Email Alerts',
+      'Itemized Compliance Digest Reports',
       'Shareable GC Public Passport Link'
     ]
   },
@@ -45,8 +45,8 @@ const TIERS = [
     workers: 'Unlimited workers',
     features: [
       'Unlimited Workers & Staff',
+      'Priority 30, 15, 7, & 1-Day Urgent Alerts',
       'Multiple Foreman Accounts',
-      'Priority Support & Onboarding',
       'Custom Company Branding on Passports'
     ]
   },
@@ -139,7 +139,6 @@ export default function SignupPage() {
   const [isLoggedInUser, setIsLoggedInUser] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
-  // Detect logged-in user state & pre-fill account profile
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
       if (currentUser) {
@@ -173,13 +172,11 @@ export default function SignupPage() {
     try {
       let uid = auth.currentUser?.uid;
 
-      // 1. Create Firebase Auth user if brand new
       if (!uid) {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         uid = userCredential.user.uid;
       }
 
-      // 2. Execute API route (Handles both new signup & updating existing subscription)
       const res = await fetch('/api/create-subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -195,7 +192,6 @@ export default function SignupPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
-      // 3. Update or set user document limits in Firestore
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
       const tierNameObj = TIERS.find(t => t.id === selectedPriceId)?.name || 'Standard Crew';
 
@@ -209,13 +205,11 @@ export default function SignupPage() {
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      // 4. Always display the Stripe Payment Element form if a clientSecret is returned
       if (data.clientSecret) {
         setClientSecret(data.clientSecret);
         return;
       }
 
-      // Fallback redirect if no payment is required
       router.push('/dashboard');
     } catch (err: any) {
       setError(err.message);

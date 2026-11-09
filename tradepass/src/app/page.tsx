@@ -5,10 +5,10 @@ import Link from 'next/link';
 import { 
   BellRing, 
   FileCheck, 
-  Smartphone, 
   CheckCircle2, 
   ArrowRight, 
-  AlertTriangle 
+  AlertTriangle,
+  Mail
 } from 'lucide-react';
 
 export default function HomePage() {
@@ -27,7 +27,7 @@ export default function HomePage() {
         </h1>
 
         <p className="mt-6 text-lg md:text-xl text-slate-400 max-w-2xl mx-auto font-normal">
-          TradePass automatically monitors trade licenses, OSHA certs, and general liability insurance for your entire crew with 30-day SMS alerts before work stops.
+          TradePass automatically monitors trade licenses, OSHA certs, and general liability insurance for your entire crew with 30, 15, 7, and 1-day automated email alerts before work stops.
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -64,19 +64,19 @@ export default function HomePage() {
               <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
                 <BellRing className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-white">Automated SMS & Email Alerts</h3>
+              <h3 className="text-lg font-semibold text-white">Multi-Threshold Email Alerts</h3>
               <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                Receive warnings 30, 15, and 7 days before any license, workers&apos; comp policy, or safety cert expires.
+                Receive proactive email warnings at 30, 15, 7, and 1-day milestones before any worker license, insurance policy, or OSHA cert expires.
               </p>
             </article>
 
             <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
               <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
-                <Smartphone className="w-6 h-6" />
+                <Mail className="w-6 h-6" />
               </div>
               <h3 className="text-lg font-semibold text-white">1-Click GC Passport Link</h3>
               <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                Text a single verified link to General Contractors showing your entire crew&apos;s up-to-date clearance.
+                Share a single verified link with General Contractors displaying your crew&apos;s real-time clearance without forcing them to log in.
               </p>
             </article>
 
@@ -84,9 +84,9 @@ export default function HomePage() {
               <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
                 <FileCheck className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-white">Secure Cloud Storage</h3>
+              <h3 className="text-lg font-semibold text-white">Secure Cloud Verification</h3>
               <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                Keep high-resolution PDFs of master licenses, insurance binders, and OSHA cards instantly accessible.
+                Keep master licenses, OSHA card details, and clearance statuses organized and accessible anywhere from the job site.
               </p>
             </article>
           </div>
@@ -118,7 +118,7 @@ export default function HomePage() {
                 </li>
                 <li className="flex items-center space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                  <span>Automated 30-Day Expiration Alerts</span>
+                  <span>Automated 30 & 15-Day Email Alerts</span>
                 </li>
                 <li className="flex items-center space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
@@ -153,11 +153,11 @@ export default function HomePage() {
                 </li>
                 <li className="flex items-center space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                  <span>Priority 30/15/7-Day SMS Warnings</span>
+                  <span>Automated 30, 15, 7, & 1-Day Email Alerts</span>
                 </li>
                 <li className="flex items-center space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                  <span>Unlimited Document Vault Storage</span>
+                  <span>Itemized Compliance Digest Reports</span>
                 </li>
                 <li className="flex items-center space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
@@ -189,11 +189,11 @@ export default function HomePage() {
                 </li>
                 <li className="flex items-center space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                  <span>Multiple Foreman Accounts</span>
+                  <span>Priority 30, 15, 7, & 1-Day Urgent Alerts</span>
                 </li>
                 <li className="flex items-center space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                  <span>Priority Support & Onboarding</span>
+                  <span>Multiple Foreman Accounts</span>
                 </li>
                 <li className="flex items-center space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
