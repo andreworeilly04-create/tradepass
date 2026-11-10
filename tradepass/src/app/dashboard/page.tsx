@@ -20,9 +20,21 @@ import {
   Palette,
   UserCheck,
   Trash2,
-  Share2
+  Share2,
+  FileCheck
 } from 'lucide-react';
-import { collection, addDoc, doc, onSnapshot, query, serverTimestamp, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { 
+  collection, 
+  addDoc, 
+  doc, 
+  onSnapshot, 
+  query, 
+  serverTimestamp, 
+  updateDoc, 
+  deleteDoc,
+  arrayUnion, 
+  arrayRemove 
+} from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
@@ -89,11 +101,16 @@ export default function DashboardPage() {
   const [showForemanModal, setShowForemanModal] = useState(false);
   const [showBrandingModal, setShowBrandingModal] = useState(false);
   
+  // Worker Deletion & Details Modals
+  const [workerToDelete, setWorkerToDelete] = useState<Worker | null>(null);
+  const [deletingWorker, setDeletingWorker] = useState(false);
+  const [workerDetailsModal, setWorkerDetailsModal] = useState<Worker | null>(null);
+
   const [copiedLink, setCopiedLink] = useState(false);
 
   const [workerName, setWorkerName] = useState('');
   const [workerRole, setWorkerRole] = useState('');
-  const [workerTrade, setWorkerTrade] = useState('Electrical');
+  const [workerTrade, setWorkerTrade] = useState('General'); // Default fallback trade
   const [oshaCertNumber, setOshaCertNumber] = useState('');
   const [oshaExpDate, setOshaExpDate] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -170,7 +187,9 @@ export default function DashboardPage() {
   const isAtCapacity = !isEnterpriseTier && totalActive >= maxWorkers;
   const brandColor = profile?.brandColor || '#0ea5e9';
 
-  // Native Web Share API Handler
+  const subscriptionStatus = profile?.subscriptionStatus || 'active';
+  const isSubscriptionExpired = subscriptionStatus === 'expired' || subscriptionStatus === 'canceled' || subscriptionStatus === 'past_due';
+
   const handleSharePassport = async () => {
     if (!user?.uid) return;
 
@@ -206,7 +225,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Clipboard Copy Handler
   const handleCopyPassport = async () => {
     if (!user?.uid) return;
 
@@ -259,7 +277,7 @@ export default function DashboardPage() {
     } else {
       workers.forEach((w, index) => {
         digestText += `${index + 1}. WORKER: ${w.name.toUpperCase()}\n`;
-        digestText += `   - Role/Trade: ${w.role} (${w.trade})\n`;
+        digestText += `   - Trade & Role: ${w.trade || 'General'} — ${w.role}\n`;
         digestText += `   - Compliance Status: [${w.status?.toUpperCase()}]\n`;
         digestText += `   - OSHA Cert Number: ${w.oshaCertNumber || 'N/A'}\n`;
         digestText += `   - OSHA Expiration Date: ${formatDateString(w.oshaExpDate)}\n`;
@@ -297,7 +315,7 @@ export default function DashboardPage() {
       await addDoc(collection(db, 'users', user.uid, 'workers'), {
         name: workerName,
         role: workerRole || 'Technician',
-        trade: workerTrade,
+        trade: workerTrade || 'General',
         oshaCertNumber: oshaCertNumber || 'N/A',
         oshaExpDate: oshaExpDate || '',
         fileName: selectedFile ? selectedFile.name : null,
@@ -307,6 +325,7 @@ export default function DashboardPage() {
 
       setWorkerName('');
       setWorkerRole('');
+      setWorkerTrade('General');
       setOshaCertNumber('');
       setOshaExpDate('');
       setSelectedFile(null);
@@ -316,6 +335,20 @@ export default function DashboardPage() {
       setFormError(err.message || 'Failed to add worker profile.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteWorker = async () => {
+    if (!user || !workerToDelete) return;
+
+    try {
+      setDeletingWorker(true);
+      await deleteDoc(doc(db, 'users', user.uid, 'workers', workerToDelete.id));
+      setWorkerToDelete(null);
+    } catch (err) {
+      console.error("Error deleting worker profile:", err);
+    } finally {
+      setDeletingWorker(false);
     }
   };
 
@@ -364,7 +397,8 @@ export default function DashboardPage() {
 
   const filteredWorkers = workers.filter(w => 
     w.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    w.role.toLowerCase().includes(searchTerm.toLowerCase())
+    w.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (w.trade && w.trade.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const compliantCount = workers.filter(w => w.status === 'Compliant').length;
@@ -384,6 +418,31 @@ export default function DashboardPage() {
       
       <main className="max-w-7xl mx-auto px-6 py-8 w-full flex-grow">
         
+        {/* Dynamic Expiration / Past-Due Alert Banner */}
+        {isSubscriptionExpired && (
+          <div className="mb-6 p-4 bg-rose-950/40 border border-rose-800/80 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 text-rose-300 text-sm shadow-xl">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-rose-900/50 rounded-xl border border-rose-700/50 flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-rose-400" />
+              </div>
+              <div>
+                <h4 className="font-bold text-white">Your TradePass plan has expired</h4>
+                <p className="text-xs text-rose-300/80 mt-0.5">
+                  {subscriptionStatus === 'past_due'
+                    ? 'Your recent subscription auto-payment failed. Please update your payment details to reactivate.'
+                    : 'Your subscription cycle ended. Renew your plan to reactivate public clearance links and worker tracking.'}
+                </p>
+              </div>
+            </div>
+            <button 
+              onClick={() => router.push('/signup')}
+              className="w-full sm:w-auto bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-rose-600/20 flex-shrink-0"
+            >
+              Renew Subscription
+            </button>
+          </div>
+        )}
+
         {/* Navigation & Company Branding Header */}
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800/80 pb-6">
           <div className="flex items-center space-x-4">
@@ -395,15 +454,20 @@ export default function DashboardPage() {
               />
             ) : (
               <div 
-                className="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-slate-950 text-xl shadow-md"
-                style={{ backgroundColor: brandColor }}
+                className="w-12 h-12 rounded-xl flex items-center justify-center font-extrabold text-white text-xl shadow-lg ring-2 ring-white/10"
+                style={{ 
+                  backgroundColor: brandColor || '#3b82f6',
+                  boxShadow: `0 0 20px ${brandColor}40`
+                }}
               >
                 {companyName.charAt(0)}
               </div>
             )}
             <div>
               <h1 className="text-2xl font-extrabold text-white tracking-tight flex items-center space-x-2">
-                <span>{companyName}</span>
+                <span style={{ color: brandColor && brandColor !== '#0ea5e9' ? brandColor : '#ffffff' }}>
+                  {companyName}
+                </span>
               </h1>
               <p className="text-sm text-slate-400 mt-0.5">
                 Compliance Command Center • Job-site access & worker certifications.
@@ -486,7 +550,6 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="flex items-center space-x-2 w-full md:w-auto flex-wrap sm:flex-nowrap">
-              {/* Export Digest */}
               <button
                 onClick={handleDownloadDigest}
                 className="flex-1 md:flex-initial bg-slate-800 hover:bg-slate-750 text-white text-xs font-semibold px-3 py-2.5 rounded-xl border border-slate-700 flex items-center justify-center space-x-1.5 transition"
@@ -496,7 +559,6 @@ export default function DashboardPage() {
                 <span>Digest</span>
               </button>
               
-              {/* Native Share Link Button - Styled Blue */}
               <button
                 type="button"
                 onClick={handleSharePassport}
@@ -507,7 +569,6 @@ export default function DashboardPage() {
                 <span>Share Link</span>
               </button>
 
-              {/* Copy Link Backup */}
               <button
                 type="button"
                 onClick={handleCopyPassport}
@@ -530,7 +591,6 @@ export default function DashboardPage() {
                 )}
               </button>
 
-              {/* External Link Direct Preview */}
               {user?.uid && (
                 <a
                   href={`/passport/${user.uid}`}
@@ -617,7 +677,6 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* Add Worker Profile Button - Styled Blue */}
           <button 
             onClick={() => setShowUploadModal(true)}
             disabled={isAtCapacity}
@@ -645,7 +704,7 @@ export default function DashboardPage() {
                 <thead className="bg-slate-950/50 text-xs font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-800">
                   <tr>
                     <th className="px-6 py-3">Worker Name</th>
-                    <th className="px-6 py-3">Role / Specialty</th>
+                    <th className="px-6 py-3">Trade / Role</th>
                     <th className="px-6 py-3">Compliance Status</th>
                     <th className="px-6 py-3">OSHA Expiration</th>
                     <th className="px-6 py-3 text-right">Actions</th>
@@ -655,7 +714,9 @@ export default function DashboardPage() {
                   {filteredWorkers.map((worker) => (
                     <tr key={worker.id} className="hover:bg-slate-800/40 transition">
                       <td className="px-6 py-4 font-semibold text-white">{worker.name}</td>
-                      <td className="px-6 py-4 text-slate-400">{worker.role}</td>
+                      <td className="px-6 py-4 text-slate-400">
+                        <span className="text-white font-medium">{worker.trade || 'General'}</span> • {worker.role}
+                      </td>
                       <td className="px-6 py-4">
                         {worker.status === 'Compliant' && (
                           <span className="inline-flex items-center space-x-1.5 bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 text-xs px-3 py-1 rounded-full font-semibold">
@@ -680,12 +741,23 @@ export default function DashboardPage() {
                         {formatDateString(worker.oshaExpDate)}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button 
-                          onClick={() => alert(`Worker: ${worker.name}\nOSHA #: ${worker.oshaCertNumber || 'N/A'}\nExp Date: ${formatDateString(worker.oshaExpDate)}\nAttached Doc: ${worker.fileName || 'None'}`)}
-                          className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition"
-                        >
-                          View Details →
-                        </button>
+                        <div className="flex items-center justify-end space-x-3">
+                          {/* View Details Modal Trigger */}
+                          <button 
+                            onClick={() => setWorkerDetailsModal(worker)}
+                            className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition"
+                          >
+                            View Details
+                          </button>
+
+                          <button
+                            onClick={() => setWorkerToDelete(worker)}
+                            className="p-1 text-slate-500 hover:text-rose-400 transition"
+                            title="Delete Worker Profile"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -694,6 +766,123 @@ export default function DashboardPage() {
             )}
           </div>
         </section>
+
+        {/* Modal: Worker Details Breakdown */}
+        {workerDetailsModal && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+              <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
+                <div className="flex items-center space-x-2 text-blue-400">
+                  <FileCheck className="w-5 h-5" />
+                  <h3 className="text-lg font-bold text-white">Worker Certification Details</h3>
+                </div>
+                <button 
+                  onClick={() => setWorkerDetailsModal(null)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 text-sm text-slate-300">
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Full Name</span>
+                    <span className="text-base font-bold text-white">{workerDetailsModal.name}</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Trade</span>
+                      <span className="text-slate-200 font-semibold">{workerDetailsModal.trade || 'General'}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Role / Specialty</span>
+                      <span className="text-slate-200">{workerDetailsModal.role}</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">OSHA Card Number</span>
+                    <span className="font-mono text-white bg-slate-900 px-2 py-1 rounded border border-slate-800 text-xs inline-block mt-0.5">
+                      {workerDetailsModal.oshaCertNumber || 'N/A'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Expiration Date</span>
+                      <span className="text-slate-200">{formatDateString(workerDetailsModal.oshaExpDate)}</span>
+                    </div>
+                    <div>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Status</span>
+                      <span className={`font-semibold ${workerDetailsModal.status === 'Compliant' ? 'text-emerald-400' : workerDetailsModal.status === 'Warning' ? 'text-amber-400' : 'text-rose-400'}`}>
+                        {workerDetailsModal.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Attached Verification Document</span>
+                    <span className="text-xs text-blue-400 flex items-center space-x-1.5 mt-0.5">
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>{workerDetailsModal.fileName || 'No document attached'}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <button
+                  onClick={() => setWorkerDetailsModal(null)}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-2.5 rounded-xl text-xs transition"
+                >
+                  Close Details
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Delete Worker Confirmation */}
+        {workerToDelete && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center space-x-2 text-rose-500">
+                  <AlertTriangle className="w-5 h-5" />
+                  <h3 className="text-lg font-bold text-white">Delete Worker Profile?</h3>
+                </div>
+                <button 
+                  onClick={() => setWorkerToDelete(null)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <p className="text-sm text-slate-300 mb-6">
+                Are you sure you want to remove <span className="font-bold text-white">&quot;{workerToDelete.name}&quot;</span> from your crew roster? This action is permanent and deletes all associated certification metadata.
+              </p>
+
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setWorkerToDelete(null)}
+                  className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 rounded-xl text-xs transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteWorker}
+                  disabled={deletingWorker}
+                  className="w-1/2 bg-rose-600 hover:bg-rose-500 text-white font-semibold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+                >
+                  {deletingWorker ? 'Deleting...' : 'Delete Profile'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal: Add Worker Profile */}
         {showUploadModal && (
@@ -733,12 +922,31 @@ export default function DashboardPage() {
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Role / Specialty
+                    Trade Specialty
+                  </label>
+                  <select
+                    value={workerTrade}
+                    onChange={(e) => setWorkerTrade(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="General">General / Other</option>
+                    <option value="Flooring">Flooring</option>
+                    <option value="Electrical">Electrical</option>
+                    <option value="Plumbing">Plumbing</option>
+                    <option value="HVAC">HVAC</option>
+                    <option value="Carpentry">Carpentry</option>
+                    <option value="Roofing">Roofing</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                    Role / Position
                   </label>
                   <input 
                     type="text" 
                     required
-                    placeholder="e.g. Journeyman Electrician"
+                    placeholder="e.g. Flooring Technician"
                     value={workerRole}
                     onChange={(e) => setWorkerRole(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
