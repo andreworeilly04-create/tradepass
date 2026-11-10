@@ -8,7 +8,7 @@ import {
   CheckCircle2, 
   ArrowRight, 
   AlertTriangle,
-  Mail
+  ShieldCheck
 } from 'lucide-react';
 
 export default function HomePage() {
@@ -27,7 +27,7 @@ export default function HomePage() {
         </h1>
 
         <p className="mt-6 text-lg md:text-xl text-slate-400 max-w-2xl mx-auto font-normal">
-          TradePass automatically monitors trade licenses, OSHA certs, and general liability insurance for your entire crew with 30, 15, 7, and 1-day automated email alerts before work stops.
+          TradePass automatically monitors trade licenses, OSHA certs, and general liability insurance for your entire crew with automated email alerts before work stops.
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -66,17 +66,17 @@ export default function HomePage() {
               </div>
               <h3 className="text-lg font-semibold text-white">Multi-Threshold Email Alerts</h3>
               <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                Receive proactive email warnings at 30, 15, 7, and 1-day milestones before any worker license, insurance policy, or OSHA cert expires.
+                Receive proactive email warnings before any worker license, insurance policy, or OSHA cert expires.
               </p>
             </article>
 
             <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
               <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
-                <Mail className="w-6 h-6" />
+                <ShieldCheck className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-white">1-Click GC Passport Link</h3>
+              <h3 className="text-lg font-semibold text-white">Public Roster GC Passport</h3>
               <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                Share a single verified link with General Contractors displaying your crew&apos;s real-time clearance without forcing them to log in.
+                Share a single live company link with General Contractors displaying your crew&apos;s real-time clearance without forcing them to log in (Crew Pro & Enterprise).
               </p>
             </article>
 
@@ -122,7 +122,7 @@ export default function HomePage() {
                 </li>
                 <li className="flex items-center space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400" />
-                  <span>Instant GC Passport Links</span>
+                  <span>Internal Credential & Roster Tracking</span>
                 </li>
               </ul>
             </div>

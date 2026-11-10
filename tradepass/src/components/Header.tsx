@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
-import { ExternalLink, Settings, LogOut } from 'lucide-react';
+import { ExternalLink, Settings, LogOut, Lock, Check } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
@@ -21,6 +21,7 @@ export default function Header() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const isAuthPage = pathname === '/login' || pathname === '/signup';
   const isDashboard = pathname.startsWith('/dashboard') || pathname.startsWith('/settings');
@@ -58,7 +59,7 @@ export default function Header() {
   const handleSignOut = async () => {
     try {
       setSigningOut(true);
-      setProfile(null); // Clear profile immediately on sign out click
+      setProfile(null);
       await signOut(auth);
       router.push('/login');
     } catch (err) {
@@ -68,10 +69,21 @@ export default function Header() {
     }
   };
 
+  const handleCopyPublicLink = () => {
+    if (!user) return;
+    const passportUrl = `${window.location.origin}/passport/${user.uid}`;
+    navigator.clipboard.writeText(passportUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 3000);
+  };
+
   if (isAuthPage) return null;
 
+  const rawTier = (profile?.planTier || 'Standard Crew').toLowerCase();
+  const isStandardTier = rawTier.includes('standard');
+  const isEnterpriseTier = rawTier.includes('enterprise');
+  const planTierDisplay = isEnterpriseTier ? 'Multi-Crew Enterprise' : isStandardTier ? 'Standard Crew' : 'Crew Pro';
   const userInitials = getInitials(profile?.companyName || user?.displayName, user?.email);
-  const planTier = profile?.planTier || 'Crew Pro';
 
   return (
     <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-50 px-6 py-2">
@@ -82,7 +94,7 @@ export default function Header() {
           <Link href={user ? "/dashboard" : "/"} className="flex items-center">
             <div className="relative w-52 h-16 flex items-center justify-center">
               <Image 
-                src="/TradePass logo.png" 
+                src="/TradePass-logo.png" 
                 alt="TradePass Logo" 
                 width={220} 
                 height={70}
@@ -93,7 +105,7 @@ export default function Header() {
           </Link>
           {isDashboard && (
             <span className="bg-blue-950 text-blue-400 border border-blue-800/60 text-xs px-2.5 py-1 rounded-full font-semibold ml-1">
-              {planTier}
+              {planTierDisplay}
             </span>
           )}
         </div>
@@ -111,13 +123,25 @@ export default function Header() {
         <div className="flex items-center space-x-3">
           {isDashboard ? (
             <>
-              <button 
-                onClick={() => alert(`Public Pass Link: https://tradepass.com/verify/${user?.uid}`)}
-                className="hidden sm:flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-800 transition"
-              >
-                <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
-                <span>Copy Public GC Pass Link</span>
-              </button>
+              {/* Dynamic GC Passport Link Control: Locked on Standard, Copyable on Pro/Enterprise */}
+              {isStandardTier ? (
+                <button 
+                  onClick={() => router.push('/signup')}
+                  className="hidden sm:flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-800 transition"
+                  title="Public Passport Link locked on Standard plan"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Upgrade to Share Passport</span>
+                </button>
+              ) : (
+                <button 
+                  onClick={handleCopyPublicLink}
+                  className="hidden sm:flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-800 transition"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <ExternalLink className="w-3.5 h-3.5 text-blue-400" />}
+                  <span>{copiedLink ? 'Link Copied!' : 'Copy Public GC Link'}</span>
+                </button>
+              )}
 
               {/* Dynamic User Initials Badge */}
               <div className="w-8 h-8 rounded-full bg-blue-600/30 border border-blue-500/50 text-blue-300 font-extrabold text-xs flex items-center justify-center tracking-wider">

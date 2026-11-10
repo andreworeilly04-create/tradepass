@@ -49,7 +49,7 @@ export default function LoginPage() {
         <Link href="/" className="inline-flex items-center justify-center mb-2">
           <div className="relative w-48 h-48 flex items-center justify-center -my-6">
             <Image 
-              src="/TradePass logo.png" 
+              src="/TradePass-logo.png" 
               alt="TradePass Logo" 
               width={192} 
               height={192}

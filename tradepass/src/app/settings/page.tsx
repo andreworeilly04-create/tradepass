@@ -185,7 +185,7 @@ export default function SettingsPage() {
             onClick={() => setActiveTab('billing')}
             className={`pb-3 px-4 text-sm font-semibold transition border-b-2 ${
               activeTab === 'billing' 
-                ? 'border-emerald-500 text-emerald-400' 
+                ? 'border-blue-500 text-blue-400' 
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -195,7 +195,7 @@ export default function SettingsPage() {
             onClick={() => setActiveTab('profile')}
             className={`pb-3 px-4 text-sm font-semibold transition border-b-2 ${
               activeTab === 'profile' 
-                ? 'border-emerald-500 text-emerald-400' 
+                ? 'border-blue-500 text-blue-400' 
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -209,7 +209,7 @@ export default function SettingsPage() {
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
                 <div>
-                  <span className={`inline-flex items-center space-x-1.5 ${isCanceled ? 'bg-amber-950/80 text-amber-400 border-amber-800/60' : 'bg-emerald-950 text-emerald-400 border-emerald-800/60'} border text-xs px-3 py-1 rounded-full font-semibold mb-3`}>
+                  <span className={`inline-flex items-center space-x-1.5 ${isCanceled ? 'bg-amber-950/80 text-amber-400 border-amber-800/60' : 'bg-blue-950 text-blue-400 border-blue-800/60'} border text-xs px-3 py-1 rounded-full font-semibold mb-3`}>
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span className="capitalize">{isCanceled ? 'Subscription Canceling' : 'Active Subscription'}</span>
                   </span>
@@ -234,7 +234,7 @@ export default function SettingsPage() {
                 <div className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-3 w-full sm:w-auto">
                   <button 
                     onClick={() => router.push('/signup')}
-                    className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center justify-center space-x-2 shadow-lg shadow-emerald-500/20"
+                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center justify-center space-x-2 shadow-lg shadow-blue-600/20"
                   >
                     <CreditCard className="w-4 h-4" />
                     <span>Change Tier</span>
@@ -244,7 +244,7 @@ export default function SettingsPage() {
                     <button 
                       onClick={handleResumeSubscription}
                       disabled={resuming}
-                      className="w-full sm:w-auto bg-emerald-950 hover:bg-emerald-900 border border-emerald-700/80 text-emerald-400 font-semibold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                      className="w-full sm:w-auto bg-blue-950 hover:bg-blue-900 border border-blue-700/80 text-blue-400 font-semibold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center space-x-1.5 disabled:opacity-50"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${resuming ? 'animate-spin' : ''}`} />
                       <span>{resuming ? 'Resuming...' : 'Resume Subscription'}</span>
@@ -278,7 +278,7 @@ export default function SettingsPage() {
                   type="text" 
                   value={companyName}
                   onChange={(e) => setCompanyName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
                 />
               </div>
               <div>
@@ -297,7 +297,7 @@ export default function SettingsPage() {
               <button 
                 onClick={handleSaveProfile}
                 disabled={savingProfile}
-                className="bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl transition disabled:opacity-50"
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition disabled:opacity-50 shadow-lg shadow-blue-600/20"
               >
                 {savingProfile ? 'Saving...' : 'Save Changes'}
               </button>

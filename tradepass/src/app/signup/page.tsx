@@ -21,7 +21,7 @@ const TIERS = [
     features: [
       'Up to 10 Worker Profiles',
       'Automated 30 & 15-Day Email Alerts',
-      'Instant GC Passport Links',
+      'Internal Credential & Roster Tracking',
       'Secure Cloud Document Storage'
     ]
   },
