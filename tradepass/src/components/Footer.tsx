@@ -1,18 +1,36 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { signOut } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { useAuth } from '@/context/AuthContext';
 
 export default function Footer() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
 
   // Hide the global footer on auth routes (login/signup) where clean focus is needed
   const isAuthPage = pathname === '/login' || pathname === '/signup';
   if (isAuthPage) return null;
 
   const currentYear = new Date().getFullYear();
+
+  const handleSignOut = async () => {
+    try {
+      setSigningOut(true);
+      await signOut(auth);
+      router.push('/login');
+    } catch (err) {
+      console.error('Error signing out:', err);
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   return (
     <footer className="border-t border-slate-900 bg-slate-950 text-slate-400 text-xs py-12 px-6 mt-auto">
@@ -37,7 +55,7 @@ export default function Footer() {
         </article>
 
         {/* Dynamic Navigation Links */}
-        <nav className="flex flex-wrap justify-center gap-6 font-medium" aria-label="Footer Navigation">
+        <nav className="flex flex-wrap justify-center gap-6 font-medium items-center" aria-label="Footer Navigation">
           <Link href="/#features" className="hover:text-white transition">
             Features
           </Link>
@@ -47,9 +65,19 @@ export default function Footer() {
           <Link href="/dashboard" className="hover:text-white transition">
             Dashboard
           </Link>
-          <Link href="/login" className="hover:text-white transition">
-            Log In
-          </Link>
+          {user ? (
+            <button 
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="hover:text-white transition cursor-pointer bg-transparent border-0 text-slate-400 font-medium text-xs p-0 disabled:opacity-50"
+            >
+              {signingOut ? 'Signing out...' : 'Sign Out'}
+            </button>
+          ) : (
+            <Link href="/login" className="hover:text-white transition">
+              Log In
+            </Link>
+          )}
         </nav>
 
         {/* Copyright & Legal */}
