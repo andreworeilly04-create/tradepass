@@ -110,7 +110,7 @@ export default function DashboardPage() {
 
   const [workerName, setWorkerName] = useState('');
   const [workerRole, setWorkerRole] = useState('');
-  const [workerTrade, setWorkerTrade] = useState('General'); // Default fallback trade
+  const [workerTrade, setWorkerTrade] = useState('General');
   const [oshaCertNumber, setOshaCertNumber] = useState('');
   const [oshaExpDate, setOshaExpDate] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -436,7 +436,7 @@ export default function DashboardPage() {
             </div>
             <button 
               onClick={() => router.push('/signup')}
-              className="w-full sm:w-auto bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-rose-600/20 flex-shrink-0"
+              className="w-full sm:w-auto bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-rose-600/20 flex-shrink-0 cursor-pointer"
             >
               Renew Subscription
             </button>
@@ -480,7 +480,7 @@ export default function DashboardPage() {
               <>
                 <button
                   onClick={() => setShowBrandingModal(true)}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 flex items-center space-x-1.5 transition"
+                  className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 flex items-center space-x-1.5 transition cursor-pointer"
                 >
                   <Palette className="w-3.5 h-3.5 text-sky-400" />
                   <span>Branding</span>
@@ -488,7 +488,7 @@ export default function DashboardPage() {
 
                 <button
                   onClick={() => setShowForemanModal(true)}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 flex items-center space-x-1.5 transition"
+                  className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 flex items-center space-x-1.5 transition cursor-pointer"
                 >
                   <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Foremen ({profile?.foremanEmails?.length || 0})</span>
@@ -509,7 +509,7 @@ export default function DashboardPage() {
 
             <button
               onClick={() => router.push('/signup')}
-              className="text-xs text-slate-400 hover:text-white underline transition ml-1"
+              className="text-xs text-slate-400 hover:text-white underline transition ml-1 cursor-pointer"
             >
               Change Tier
             </button>
@@ -543,7 +543,7 @@ export default function DashboardPage() {
               </div>
               <button
                 onClick={() => router.push('/signup')}
-                className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition"
+                className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition cursor-pointer"
               >
                 Upgrade to Pro
               </button>
@@ -552,7 +552,7 @@ export default function DashboardPage() {
             <div className="flex items-center space-x-2 w-full md:w-auto flex-wrap sm:flex-nowrap">
               <button
                 onClick={handleDownloadDigest}
-                className="flex-1 md:flex-initial bg-slate-800 hover:bg-slate-750 text-white text-xs font-semibold px-3 py-2.5 rounded-xl border border-slate-700 flex items-center justify-center space-x-1.5 transition"
+                className="flex-1 md:flex-initial bg-slate-800 hover:bg-slate-750 text-white text-xs font-semibold px-3 py-2.5 rounded-xl border border-slate-700 flex items-center justify-center space-x-1.5 transition cursor-pointer"
                 title="Download Itemized Compliance Digest Report"
               >
                 <FileText className="w-4 h-4 text-blue-400" />
@@ -562,7 +562,7 @@ export default function DashboardPage() {
               <button
                 type="button"
                 onClick={handleSharePassport}
-                className="flex-1 md:flex-initial bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl transition flex items-center justify-center space-x-1.5 shadow-lg shadow-blue-600/20"
+                className="flex-1 md:flex-initial bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl transition flex items-center justify-center space-x-1.5 shadow-lg shadow-blue-600/20 cursor-pointer"
                 title="Share via Text, Email, or Messaging Apps"
               >
                 <Share2 className="w-4 h-4" />
@@ -572,7 +572,7 @@ export default function DashboardPage() {
               <button
                 type="button"
                 onClick={handleCopyPassport}
-                className={`flex-1 md:flex-initial text-xs font-semibold px-3.5 py-2.5 rounded-xl border transition flex items-center justify-center space-x-1.5 ${
+                className={`flex-1 md:flex-initial text-xs font-semibold px-3.5 py-2.5 rounded-xl border transition flex items-center justify-center space-x-1.5 cursor-pointer ${
                   copiedLink
                     ? 'bg-emerald-950/60 border-emerald-500 text-emerald-400'
                     : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-white'
@@ -596,7 +596,7 @@ export default function DashboardPage() {
                   href={`/passport/${user.uid}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl flex items-center justify-center transition"
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3.5 py-2.5 rounded-xl flex items-center justify-center transition cursor-pointer"
                   title="Open Public Passport Roster in New Tab"
                 >
                   <ExternalLink className="w-4 h-4" />
@@ -657,7 +657,7 @@ export default function DashboardPage() {
             </div>
             <button 
               onClick={() => router.push('/signup')}
-              className="bg-amber-500 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-xs hover:bg-amber-400 transition"
+              className="bg-amber-500 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-xs hover:bg-amber-400 transition cursor-pointer"
             >
               Upgrade Plan
             </button>
@@ -680,7 +680,7 @@ export default function DashboardPage() {
           <button 
             onClick={() => setShowUploadModal(true)}
             disabled={isAtCapacity}
-            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm px-4 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 flex items-center justify-center space-x-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm px-4 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 flex items-center justify-center space-x-2 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Worker Profile</span>
@@ -745,14 +745,14 @@ export default function DashboardPage() {
                           {/* View Details Modal Trigger */}
                           <button 
                             onClick={() => setWorkerDetailsModal(worker)}
-                            className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition"
+                            className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer"
                           >
                             View Details
                           </button>
 
                           <button
                             onClick={() => setWorkerToDelete(worker)}
-                            className="p-1 text-slate-500 hover:text-rose-400 transition"
+                            className="p-1 text-slate-500 hover:text-rose-400 transition cursor-pointer"
                             title="Delete Worker Profile"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -778,7 +778,7 @@ export default function DashboardPage() {
                 </div>
                 <button 
                   onClick={() => setWorkerDetailsModal(null)}
-                  className="text-slate-400 hover:text-white"
+                  className="text-slate-400 hover:text-white cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -835,7 +835,7 @@ export default function DashboardPage() {
               <div className="mt-6">
                 <button
                   onClick={() => setWorkerDetailsModal(null)}
-                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-2.5 rounded-xl text-xs transition"
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer"
                 >
                   Close Details
                 </button>
@@ -855,7 +855,7 @@ export default function DashboardPage() {
                 </div>
                 <button 
                   onClick={() => setWorkerToDelete(null)}
-                  className="text-slate-400 hover:text-white"
+                  className="text-slate-400 hover:text-white cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -868,14 +868,14 @@ export default function DashboardPage() {
               <div className="flex space-x-3">
                 <button
                   onClick={() => setWorkerToDelete(null)}
-                  className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 rounded-xl text-xs transition"
+                  className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleDeleteWorker}
                   disabled={deletingWorker}
-                  className="w-1/2 bg-rose-600 hover:bg-rose-500 text-white font-semibold py-2.5 rounded-xl text-xs transition disabled:opacity-50"
+                  className="w-1/2 bg-rose-600 hover:bg-rose-500 text-white font-semibold py-2.5 rounded-xl text-xs transition disabled:opacity-50 cursor-pointer"
                 >
                   {deletingWorker ? 'Deleting...' : 'Delete Profile'}
                 </button>
@@ -892,7 +892,7 @@ export default function DashboardPage() {
                 <h3 className="text-lg font-bold text-white">Add Crew Worker Profile</h3>
                 <button 
                   onClick={() => setShowUploadModal(false)}
-                  className="text-slate-400 hover:text-white"
+                  className="text-slate-400 hover:text-white cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1005,7 +1005,7 @@ export default function DashboardPage() {
                 <button 
                   type="submit"
                   disabled={submitting}
-                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs transition disabled:opacity-50 shadow-lg shadow-blue-600/20"
+                  className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs transition disabled:opacity-50 shadow-lg shadow-blue-600/20 cursor-pointer"
                 >
                   {submitting ? 'Saving Profile...' : 'Save Worker Profile'}
                 </button>
@@ -1025,7 +1025,7 @@ export default function DashboardPage() {
                 </h3>
                 <button 
                   onClick={() => setShowForemanModal(false)}
-                  className="text-slate-400 hover:text-white"
+                  className="text-slate-400 hover:text-white cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1046,7 +1046,7 @@ export default function DashboardPage() {
                 />
                 <button 
                   type="submit"
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-3 py-2 rounded-xl text-xs transition"
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-3 py-2 rounded-xl text-xs transition cursor-pointer"
                 >
                   Add
                 </button>
@@ -1061,7 +1061,7 @@ export default function DashboardPage() {
                       <span>{email}</span>
                       <button 
                         onClick={() => handleRemoveForeman(email)}
-                        className="text-slate-500 hover:text-rose-400 transition"
+                        className="text-slate-500 hover:text-rose-400 transition cursor-pointer"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -1084,7 +1084,7 @@ export default function DashboardPage() {
                 </h3>
                 <button 
                   onClick={() => setShowBrandingModal(false)}
-                  className="text-slate-400 hover:text-white"
+                  className="text-slate-400 hover:text-white cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1130,7 +1130,7 @@ export default function DashboardPage() {
 
                 <button 
                   type="submit"
-                  className="w-full bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-sky-500/20"
+                  className="w-full bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold py-3 rounded-xl text-xs transition shadow-lg shadow-sky-500/20 cursor-pointer"
                 >
                   Save Custom Branding
                 </button>

@@ -127,7 +127,7 @@ export default function Header() {
               {isStandardTier ? (
                 <button 
                   onClick={() => router.push('/signup')}
-                  className="hidden sm:flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-800 transition"
+                  className="hidden sm:flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-800 transition cursor-pointer"
                   title="Public Passport Link locked on Standard plan"
                 >
                   <Lock className="w-3.5 h-3.5 text-amber-400" />
@@ -136,7 +136,7 @@ export default function Header() {
               ) : (
                 <button 
                   onClick={handleCopyPublicLink}
-                  className="hidden sm:flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-800 transition"
+                  className="hidden sm:flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold px-3 py-2 rounded-xl border border-slate-800 transition cursor-pointer"
                 >
                   {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <ExternalLink className="w-3.5 h-3.5 text-blue-400" />}
                   <span>{copiedLink ? 'Link Copied!' : 'Copy Public GC Link'}</span>
@@ -159,7 +159,7 @@ export default function Header() {
               <button 
                 onClick={handleSignOut}
                 disabled={signingOut}
-                className="bg-slate-900 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-900/50 text-slate-300 hover:text-rose-300 font-semibold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-2 transition disabled:opacity-50"
+                className="bg-slate-900 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-900/50 text-slate-300 hover:text-rose-300 font-semibold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-2 transition disabled:opacity-50 cursor-pointer"
               >
                 <LogOut className="w-4 h-4 text-slate-400" />
                 <span>{signingOut ? 'Signing out...' : 'Sign Out'}</span>
