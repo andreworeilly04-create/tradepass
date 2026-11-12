@@ -51,11 +51,11 @@ export default function HomePage() {
         </p>
       </section>
 
-      {/* Feature Cards Grid Section */}
-      <section id="features" className="px-6 py-16 bg-slate-900/50 border-y border-slate-800/80" aria-labelledby="features-heading">
+      {/* How It Works Section (Updated from id="features") */}
+      <section id="how-it-works" className="px-6 py-16 bg-slate-900/50 border-y border-slate-800/80 scroll-mt-24" aria-labelledby="how-it-works-heading">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
-            <h2 id="features-heading" className="text-2xl md:text-3xl font-bold text-white">Built for Skilled Trade Contractors</h2>
+            <h2 id="how-it-works-heading" className="text-2xl md:text-3xl font-bold text-white">Built for Skilled Trade Contractors</h2>
             <p className="text-sm text-slate-400 mt-2">Everything you need to satisfy GCs and keep your operations moving.</p>
           </div>
 
@@ -94,7 +94,7 @@ export default function HomePage() {
       </section>
 
       {/* Pricing Section */}
-      <section id="pricing" className="px-6 py-20 max-w-7xl mx-auto w-full" aria-labelledby="pricing-heading">
+      <section id="pricing" className="px-6 py-20 max-w-7xl mx-auto w-full scroll-mt-24" aria-labelledby="pricing-heading">
         <div className="text-center mb-14">
           <h2 id="pricing-heading" className="text-3xl font-bold text-white">Simple, Predictable Subscription Plans</h2>
           <p className="text-slate-400 mt-2">Select the plan that fits your crew size. Change or cancel anytime.</p>

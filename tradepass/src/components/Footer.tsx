@@ -18,6 +18,7 @@ export default function Footer() {
   const isAuthPage = pathname === '/login' || pathname === '/signup';
   if (isAuthPage) return null;
 
+  const isHomePage = pathname === '/';
   const currentYear = new Date().getFullYear();
 
   const handleSignOut = async () => {
@@ -38,17 +39,35 @@ export default function Footer() {
         
         {/* Brand Information */}
         <article className="flex flex-col items-center md:items-start space-y-2">
-          <Link href="/" className="inline-flex items-center">
-            <div className="relative w-40 h-40 flex items-center justify-center -my-8">
-              <Image 
-                src="/TradePass-logo.png" 
-                alt="TradePass Logo" 
-                width={160} 
-                height={160}
-                className="object-contain w-full h-full"
-              />
-            </div>
-          </Link>
+          {isHomePage ? (
+            <button
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="inline-flex items-center bg-transparent border-0 p-0 cursor-pointer"
+              aria-label="Scroll to top"
+            >
+              <div className="relative w-40 h-40 flex items-center justify-center -my-8">
+                <Image 
+                  src="/TradePass-logo.png" 
+                  alt="TradePass Logo" 
+                  width={160} 
+                  height={160}
+                  className="object-contain w-full h-full"
+                />
+              </div>
+            </button>
+          ) : (
+            <Link href={user ? "/dashboard" : "/"} className="inline-flex items-center">
+              <div className="relative w-40 h-40 flex items-center justify-center -my-8">
+                <Image 
+                  src="/TradePass-logo.png" 
+                  alt="TradePass Logo" 
+                  width={160} 
+                  height={160}
+                  className="object-contain w-full h-full"
+                />
+              </div>
+            </Link>
+          )}
           <p className="text-slate-500 text-center md:text-left">
             Automated compliance and job-site access management for trade contractors.
           </p>
@@ -56,15 +75,26 @@ export default function Footer() {
 
         {/* Dynamic Navigation Links */}
         <nav className="flex flex-wrap justify-center gap-6 font-medium items-center" aria-label="Footer Navigation">
-          <Link href="/#features" className="hover:text-white transition">
-            Features
-          </Link>
-          <Link href="/#pricing" className="hover:text-white transition">
-            Pricing
-          </Link>
-          <Link href="/dashboard" className="hover:text-white transition">
-            Dashboard
-          </Link>
+          {isHomePage ? (
+            <a href="#how-it-works" className="hover:text-white transition">
+              How It Works
+            </a>
+          ) : (
+            <Link href="/#how-it-works" className="hover:text-white transition">
+              How It Works
+            </Link>
+          )}
+
+          {isHomePage ? (
+            <a href="#pricing" className="hover:text-white transition">
+              Pricing
+            </a>
+          ) : (
+            <Link href="/#pricing" className="hover:text-white transition">
+              Pricing
+            </Link>
+          )}
+
           {user ? (
             <button 
               onClick={handleSignOut}

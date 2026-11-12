@@ -33,14 +33,15 @@ export default function LoginPage() {
       // Redirect to the dashboard on successful login
       router.push('/dashboard');
     } catch (err: any) {
+      const errorCode = err?.code || '';
       if (
-        err.code === 'auth/invalid-credential' ||
-        err.code === 'auth/user-not-found' ||
-        err.code === 'auth/wrong-password'
+        errorCode === 'auth/invalid-credential' ||
+        errorCode === 'auth/user-not-found' ||
+        errorCode === 'auth/wrong-password'
       ) {
         setError('Invalid email or password. Please try again.');
       } else {
-        setError(err.message || 'Failed to sign in. Please check your credentials.');
+        setError(err?.message || 'Failed to sign in. Please check your credentials.');
       }
     } finally {
       setLoading(false);
@@ -52,7 +53,7 @@ export default function LoginPage() {
     setResetError('');
     setResetSuccess(false);
 
-    const cleanEmail = resetEmail.trim();
+    const cleanEmail = resetEmail ? resetEmail.trim() : '';
     if (!cleanEmail) {
       setResetError('Please enter a valid email address.');
       return;
@@ -62,18 +63,19 @@ export default function LoginPage() {
 
     try {
       await sendPasswordResetEmail(auth, cleanEmail);
-      setResetEmail(cleanEmail);
       setResetSuccess(true);
     } catch (err: any) {
-      console.error('Firebase Password Reset Error:', err.code, err.message);
-      if (err.code === 'auth/user-not-found') {
+      const errorCode = err?.code || '';
+      const errorMessage = err?.message || '';
+
+      if (errorCode === 'auth/user-not-found') {
         setResetError('No account found with this email address.');
-      } else if (err.code === 'auth/invalid-email') {
+      } else if (errorCode === 'auth/invalid-email') {
         setResetError('Please enter a valid email address.');
-      } else if (err.code === 'auth/too-many-requests') {
+      } else if (errorCode === 'auth/too-many-requests') {
         setResetError('Too many reset attempts. Please wait a few minutes and try again.');
       } else {
-        setResetError(err.message || 'Failed to send password reset email. Please try again.');
+        setResetError(errorMessage || 'Failed to send password reset email. Please try again.');
       }
     } finally {
       setResetLoading(false);

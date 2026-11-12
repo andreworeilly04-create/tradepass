@@ -25,6 +25,7 @@ export default function Header() {
 
   const isAuthPage = pathname === '/login' || pathname === '/signup';
   const isDashboard = pathname.startsWith('/dashboard') || pathname.startsWith('/settings');
+  const isHomePage = pathname === '/';
 
   // Fetch Firestore User Profile dynamically & wipe state if user logs out / changes
   useEffect(() => {
@@ -91,18 +92,38 @@ export default function Header() {
         
         {/* Brand Logo & Dynamic Plan Badge */}
         <div className="flex items-center space-x-3">
-          <Link href={user ? "/dashboard" : "/"} className="flex items-center">
-            <div className="relative w-52 h-16 flex items-center justify-center">
-              <Image 
-                src="/TradePass-logo.png" 
-                alt="TradePass Logo" 
-                width={220} 
-                height={70}
-                className="object-contain w-full h-full"
-                priority
-              />
-            </div>
-          </Link>
+          {isHomePage ? (
+            <button
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="flex items-center bg-transparent border-0 p-0 cursor-pointer"
+              aria-label="Scroll to top"
+            >
+              <div className="relative w-52 h-16 flex items-center justify-center">
+                <Image 
+                  src="/TradePass-logo.png" 
+                  alt="TradePass Logo" 
+                  width={220} 
+                  height={70}
+                  className="object-contain w-full h-full"
+                  priority
+                />
+              </div>
+            </button>
+          ) : (
+            <Link href={user ? "/dashboard" : "/"} className="flex items-center">
+              <div className="relative w-52 h-16 flex items-center justify-center">
+                <Image 
+                  src="/TradePass-logo.png" 
+                  alt="TradePass Logo" 
+                  width={220} 
+                  height={70}
+                  className="object-contain w-full h-full"
+                  priority
+                />
+              </div>
+            </Link>
+          )}
+
           {isDashboard && (
             <span className="bg-blue-950 text-blue-400 border border-blue-800/60 text-xs px-2.5 py-1 rounded-full font-semibold ml-1">
               {planTierDisplay}
@@ -110,12 +131,20 @@ export default function Header() {
           )}
         </div>
 
-        {/* Navigation Links for Public Marketing Pages */}
+        {/* Navigation Links for Public Marketing Pages (How It Works & Pricing only) */}
         {!isDashboard && (
           <nav className="hidden md:flex items-center space-x-8 text-sm font-medium text-slate-400" aria-label="Main Navigation">
-            <Link href="/#features" className="hover:text-white transition">Features</Link>
-            <Link href="/#how-it-works" className="hover:text-white transition">How It Works</Link>
-            <Link href="/#pricing" className="hover:text-white transition">Pricing</Link>
+            {isHomePage ? (
+              <>
+                <a href="#how-it-works" className="hover:text-white transition">How It Works</a>
+                <a href="#pricing" className="hover:text-white transition">Pricing</a>
+              </>
+            ) : (
+              <>
+                <Link href="/#how-it-works" className="hover:text-white transition">How It Works</Link>
+                <Link href="/#pricing" className="hover:text-white transition">Pricing</Link>
+              </>
+            )}
           </nav>
         )}
 
