@@ -8,7 +8,10 @@ import {
   CheckCircle2, 
   ArrowRight, 
   AlertTriangle,
-  ShieldCheck
+  ShieldCheck,
+  FileText,
+  UserCheck,
+  Palette
 } from 'lucide-react';
 
 export default function HomePage() {
@@ -51,42 +54,83 @@ export default function HomePage() {
         </p>
       </section>
 
-      {/* How It Works Section (Updated from id="features") */}
-      <section id="how-it-works" className="px-6 py-16 bg-slate-900/50 border-y border-slate-800/80 scroll-mt-24" aria-labelledby="how-it-works-heading">
+      {/* How It Works Section */}
+      <section id="how-it-works" className="px-6 py-20 bg-slate-900/50 border-y border-slate-800/80 scroll-mt-24" aria-labelledby="how-it-works-heading">
         <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-12">
-            <h2 id="how-it-works-heading" className="text-2xl md:text-3xl font-bold text-white">Built for Skilled Trade Contractors</h2>
-            <p className="text-sm text-slate-400 mt-2">Everything you need to satisfy GCs and keep your operations moving.</p>
+          <div className="text-center mb-14">
+            <span className="text-xs font-bold uppercase tracking-wider text-blue-400">How It Works</span>
+            <h2 id="how-it-works-heading" className="text-2xl md:text-4xl font-bold text-white mt-2">
+              Built for Skilled Trade Contractors
+            </h2>
+            <p className="text-sm md:text-base text-slate-400 mt-3 max-w-2xl mx-auto">
+              Upload your crew&apos;s credentials once and let TradePass handle expiration tracking, GC clearance links, and audit-ready compliance reports.
+            </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* 1. Automated Expiration Alerts */}
+            <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800 hover:border-slate-700 transition">
               <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
                 <BellRing className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-white">Multi-Threshold Email Alerts</h3>
+              <h3 className="text-lg font-semibold text-white">30, 15, 7 & 1-Day Alerts</h3>
               <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                Receive proactive email warnings before any worker license, insurance policy, or OSHA cert expires.
+                Receive automated email warnings at 30, 15, 7, and 1 day out before any worker&apos;s OSHA certification, trade license, or policy expires.
               </p>
             </article>
 
-            <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
-              <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
+            {/* 2. Live GC Public Passport */}
+            <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800 hover:border-slate-700 transition">
+              <div className="bg-emerald-600/10 p-3 rounded-xl w-fit text-emerald-400 mb-4 border border-emerald-500/20">
                 <ShieldCheck className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-white">Public Roster GC Passport</h3>
+              <h3 className="text-lg font-semibold text-white">Shareable GC Public Passport</h3>
               <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                Share a single live company link with General Contractors displaying your crew&apos;s real-time clearance without forcing them to log in (Crew Pro & Enterprise).
+                Text or email a single live clearance link to General Contractors so they can verify your crew&apos;s status on-site without needing a login.
               </p>
             </article>
 
-            <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800">
+            {/* 3. Itemized Compliance Digest */}
+            <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800 hover:border-slate-700 transition">
+              <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
+                <FileText className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-semibold text-white">One-Click Compliance Digests</h3>
+              <p className="text-sm text-slate-400 mt-2 leading-relaxed">
+                Instantly export itemized roster reports detailing active workers, OSHA certificate numbers, expiration dates, and attached verification files.
+              </p>
+            </article>
+
+            {/* 4. Multi-Foreman Access */}
+            <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800 hover:border-slate-700 transition">
+              <div className="bg-emerald-600/10 p-3 rounded-xl w-fit text-emerald-400 mb-4 border border-emerald-500/20">
+                <UserCheck className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-semibold text-white">Job-Site Foreman Accounts</h3>
+              <p className="text-sm text-slate-400 mt-2 leading-relaxed">
+                Authorize field supervisors and site foremen to check crew clearance on the spot before anyone steps onto a restricted commercial site.
+              </p>
+            </article>
+
+            {/* 5. Custom Company Branding */}
+            <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800 hover:border-slate-700 transition">
+              <div className="bg-sky-600/10 p-3 rounded-xl w-fit text-sky-400 mb-4 border border-sky-500/20">
+                <Palette className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-semibold text-white">Custom Company Branding</h3>
+              <p className="text-sm text-slate-400 mt-2 leading-relaxed">
+                White-label your public GC Passport and command center with your company logo and brand colors for a polished, enterprise presentation.
+              </p>
+            </article>
+
+            {/* 6. Centralized Cloud Verification */}
+            <article className="bg-slate-950 p-6 rounded-2xl border border-slate-800 hover:border-slate-700 transition">
               <div className="bg-blue-600/10 p-3 rounded-xl w-fit text-blue-400 mb-4 border border-blue-500/20">
                 <FileCheck className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-semibold text-white">Secure Cloud Verification</h3>
+              <h3 className="text-lg font-semibold text-white">Cloud Credential Vault</h3>
               <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                Keep master licenses, OSHA card details, and clearance statuses organized and accessible anywhere from the job site.
+                Store OSHA-10/30 cards, trade licenses, and PDFs in one searchable roster organized by trade—accessible from any phone or tablet in the field.
               </p>
             </article>
           </div>
