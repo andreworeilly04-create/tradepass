@@ -279,7 +279,7 @@ export default function DashboardPage() {
         digestText += `${index + 1}. WORKER: ${w.name.toUpperCase()}\n`;
         digestText += `   - Trade & Role: ${w.trade || 'General'} — ${w.role}\n`;
         digestText += `   - Compliance Status: [${w.status?.toUpperCase()}]\n`;
-        digestText += `   - Credential / License Number: ${w.oshaCertNumber || 'N/A'}\n`;
+        digestText += `   - Credential / Policy Number: ${w.oshaCertNumber || 'N/A'}\n`;
         digestText += `   - Expiration Date: ${formatDateString(w.oshaExpDate)}\n`;
         digestText += `   - Attached Verification Document: ${w.fileName || 'None'}\n`;
         digestText += `---------------------------------------------------\n`;
@@ -802,7 +802,7 @@ export default function DashboardPage() {
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Credential / License Number</span>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Credential / Policy Number</span>
                     <span className="font-mono text-white bg-slate-900 px-2 py-1 rounded border border-slate-800 text-xs inline-block mt-0.5">
                       {workerDetailsModal.oshaCertNumber || 'N/A'}
                     </span>
@@ -954,11 +954,11 @@ export default function DashboardPage() {
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Credential / License Number
+                    Credential / Policy Number
                   </label>
                   <input 
                     type="text" 
-                    placeholder="e.g. OSHA-30-99482 or LIC-88412"
+                    placeholder="e.g. OSHA-30-99482, LIC-88412, or POL-40921"
                     value={oshaCertNumber}
                     onChange={(e) => setOshaCertNumber(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
