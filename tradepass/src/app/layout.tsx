@@ -5,13 +5,11 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 
 export const metadata: Metadata = {
-  title: 'TradePass | Automated Contractor License & Insurance Tracker',
-  description:
-    'Automate trade license, OSHA certification, and liability insurance tracking for sub-contractors. Get 30-day SMS alerts before expensive job-site shutdowns.',
+  title: 'TradePass | Contractor Compliance & OSHA Expiration Tracking Software',
+  description: 'Automated trade license, OSHA certification, and liability insurance tracking for trade contractors. Get 30, 15, 7, and 1-day email alerts, shareable GC public passports, and instant compliance digests.',
   openGraph: {
-    title: 'TradePass | Contractor Compliance Made Easy',
-    description:
-      'Keep your entire crew 100% job-site compliant with automated SMS alerts before licenses, insurance binders, and OSHA certs expire.',
+    title: 'TradePass | Subcontractor Compliance & Job-Site Safety Tracking',
+    description: 'Keep your entire crew 100% job-site compliant with automated email expiration alerts, multi-foreman accounts, and custom-branded GC clearance passports.',
     url: 'https://gettradepass.com',
     siteName: 'TradePass',
     type: 'website',
