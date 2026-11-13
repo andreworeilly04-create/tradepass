@@ -1,112 +1,85 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-10-28.endive',
 });
 
-// Disable Next.js body parser so we can read the raw request stream for Stripe signature verification
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
 export async function POST(req: Request) {
-  const bodyText = await req.text();
-  const signature = req.headers.get('stripe-signature');
-
-  if (!signature) {
-    return NextResponse.json({ error: 'Missing stripe-signature header' }, { status: 400 });
-  }
-
-  let event: Stripe.Event;
-
   try {
-    event = stripe.webhooks.constructEvent(
-      bodyText,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
-  } catch (err: any) {
-    console.error(`Webhook signature verification failed: ${err.message}`);
-    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
-  }
+    const { email, companyName, priceId, uid, subscriptionId } = await req.json();
 
-  try {
-    switch (event.type) {
-      case 'invoice.payment_succeeded': {
-        const invoice = event.data.object as Stripe.Invoice as any;
-        const subscriptionId = invoice.subscription as string;
-
-        if (subscriptionId) {
-          const usersRef = collection(db, 'users');
-          const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
-          const querySnapshot = await getDocs(q);
-
-          if (!querySnapshot.empty) {
-            querySnapshot.forEach(async (userDoc) => {
-              await updateDoc(doc(db, 'users', userDoc.id), {
-                subscriptionStatus: 'active',
-                updatedAt: new Date(),
-              });
-            });
-            console.log(`Successfully activated subscription for sub ID: ${subscriptionId}`);
-          }
-        }
-        break;
-      }
-
-      case 'customer.subscription.updated': {
-        const subscription = event.data.object as Stripe.Subscription;
-        const subscriptionId = subscription.id;
-        const status = subscription.status;
-
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
-        const querySnapshot = await getDocs(q);
-
-        if (!querySnapshot.empty) {
-          querySnapshot.forEach(async (userDoc) => {
-            await updateDoc(doc(db, 'users', userDoc.id), {
-              subscriptionStatus: status,
-              updatedAt: new Date(),
-            });
-          });
-          console.log(`Updated subscription ${subscriptionId} status to: ${status}`);
-        }
-        break;
-      }
-
-      case 'customer.subscription.deleted': {
-        const subscription = event.data.object as Stripe.Subscription;
-        const subscriptionId = subscription.id;
-
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
-        const querySnapshot = await getDocs(q);
-
-        if (!querySnapshot.empty) {
-          querySnapshot.forEach(async (userDoc) => {
-            await updateDoc(doc(db, 'users', userDoc.id), {
-              subscriptionStatus: 'canceled',
-              updatedAt: new Date(),
-            });
-          });
-          console.log(`Marked subscription ${subscriptionId} as canceled.`);
-        }
-        break;
-      }
-
-      default:
-        console.log(`Unhandled Stripe event type: ${event.type}`);
+    if (!email || !priceId || !uid) {
+      return NextResponse.json(
+        { error: 'Missing required fields (email, priceId, uid).' },
+        { status: 400 }
+      );
     }
-  } catch (dbErr: any) {
-    console.error('Error updating Firestore in webhook:', dbErr);
-    return NextResponse.json({ error: 'Database update failed' }, { status: 500 });
-  }
 
-  return NextResponse.json({ received: true }, { status: 200 });
+    let subscription;
+
+    if (subscriptionId) {
+      // Retrieve existing subscription to find its item ID
+      const existingSub = await stripe.subscriptions.retrieve(subscriptionId);
+      const subscriptionItemId = existingSub?.items?.data?.[0]?.id;
+
+      // Update the subscription
+      subscription = await stripe.subscriptions.update(subscriptionId, {
+        items: [{ id: subscriptionItemId, price: priceId }],
+        proration_behavior: 'always_invoice',
+        payment_behavior: 'default_incomplete',
+        payment_settings: { save_default_payment_method: 'on_subscription' },
+        expand: ['latest_invoice.payment_intent'],
+      });
+    } else {
+      // Find or create customer
+      const customers = await stripe.customers.list({ email, limit: 1 });
+      let customer = customers?.data?.[0];
+
+      if (!customer) {
+        customer = await stripe.customers.create({
+          email,
+          name: companyName,
+          metadata: { firebaseUID: uid },
+        });
+      }
+
+      // Create a new subscription
+      subscription = await stripe.subscriptions.create({
+        customer: customer.id,
+        items: [{ price: priceId }],
+        payment_behavior: 'default_incomplete',
+        payment_settings: { save_default_payment_method: 'on_subscription' },
+        expand: ['latest_invoice.payment_intent'],
+      });
+    }
+
+    // Defensive extraction preventing the undefined crash
+    const latestInvoice = subscription?.latest_invoice;
+    const invoiceObj = typeof latestInvoice === 'object' ? latestInvoice as Stripe.Invoice : null;
+    const paymentIntent = invoiceObj?.payment_intent;
+    const paymentIntentObj = typeof paymentIntent === 'object' ? paymentIntent as Stripe.PaymentIntent : null;
+
+    const clientSecret = paymentIntentObj?.client_secret;
+
+    if (!clientSecret) {
+      return NextResponse.json(
+        { error: 'Failed to generate payment intent client secret from Stripe.' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      subscriptionId: subscription.id,
+      clientSecret: clientSecret,
+    });
+
+  } catch (err: any) {
+    console.error('Subscription API Error:', err);
+    return NextResponse.json(
+      { error: err.message || 'Failed to process subscription' },
+      { status: 500 }
+    );
+  }
 }
