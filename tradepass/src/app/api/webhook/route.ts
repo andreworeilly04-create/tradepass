@@ -1,85 +1,121 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
+import { db } from '@/lib/firebase';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-10-28.endive',
 });
 
 export async function POST(req: Request) {
+  const signature = req.headers.get('stripe-signature');
+
+  if (!signature) {
+    return NextResponse.json({ error: 'Missing stripe-signature header' }, { status: 400 });
+  }
+
+  let event: Stripe.Event;
+
   try {
-    const { email, companyName, priceId, uid, subscriptionId } = await req.json();
+    const bodyText = await req.text();
+    
+    event = stripe.webhooks.constructEvent(
+      bodyText,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET!
+    );
+  } catch (err: any) {
+    console.error(`Webhook signature verification failed: ${err.message}`);
+    return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+  }
 
-    if (!email || !priceId || !uid) {
-      return NextResponse.json(
-        { error: 'Missing required fields (email, priceId, uid).' },
-        { status: 400 }
-      );
-    }
+  try {
+    switch (event.type) {
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object as Stripe.Invoice;
+        
+        // Safely extract subscription ID whether it's a string, object, or null
+        const subField = (invoice as any)?.subscription;
+        const subscriptionId = typeof subField === 'string' 
+          ? subField 
+          : subField && typeof subField === 'object' && 'id' in subField 
+            ? (subField as any).id 
+            : null;
 
-    let subscription;
+        if (!subscriptionId) {
+          break; // Normal for non-subscription invoices
+        }
 
-    if (subscriptionId) {
-      // Retrieve existing subscription to find its item ID
-      const existingSub = await stripe.subscriptions.retrieve(subscriptionId);
-      const subscriptionItemId = existingSub?.items?.data?.[0]?.id;
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
+        const querySnapshot = await getDocs(q);
 
-      // Update the subscription
-      subscription = await stripe.subscriptions.update(subscriptionId, {
-        items: [{ id: subscriptionItemId, price: priceId }],
-        proration_behavior: 'always_invoice',
-        payment_behavior: 'default_incomplete',
-        payment_settings: { save_default_payment_method: 'on_subscription' },
-        expand: ['latest_invoice.payment_intent'],
-      });
-    } else {
-      // Find or create customer
-      const customers = await stripe.customers.list({ email, limit: 1 });
-      let customer = customers?.data?.[0];
-
-      if (!customer) {
-        customer = await stripe.customers.create({
-          email,
-          name: companyName,
-          metadata: { firebaseUID: uid },
-        });
+        if (!querySnapshot.empty) {
+          for (const userDoc of querySnapshot.docs) {
+            await updateDoc(doc(db, 'users', userDoc.id), {
+              subscriptionStatus: 'active',
+              updatedAt: new Date(),
+            });
+          }
+          console.log(`Successfully activated subscription for sub ID: ${subscriptionId}`);
+        }
+        break;
       }
 
-      // Create a new subscription
-      subscription = await stripe.subscriptions.create({
-        customer: customer.id,
-        items: [{ price: priceId }],
-        payment_behavior: 'default_incomplete',
-        payment_settings: { save_default_payment_method: 'on_subscription' },
-        expand: ['latest_invoice.payment_intent'],
-      });
+      case 'customer.subscription.updated': {
+        const subscription = event.data.object as Stripe.Subscription;
+        const subscriptionId = subscription?.id;
+        const status = subscription?.status;
+
+        if (!subscriptionId || !status) break;
+
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+          for (const userDoc of querySnapshot.docs) {
+            await updateDoc(doc(db, 'users', userDoc.id), {
+              subscriptionStatus: status,
+              cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+              updatedAt: new Date(),
+            });
+          }
+          console.log(`Updated subscription ${subscriptionId} status to: ${status}`);
+        }
+        break;
+      }
+
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object as Stripe.Subscription;
+        const subscriptionId = subscription?.id;
+
+        if (!subscriptionId) break;
+
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+          for (const userDoc of querySnapshot.docs) {
+            await updateDoc(doc(db, 'users', userDoc.id), {
+              subscriptionStatus: 'canceled',
+              cancelAtPeriodEnd: false,
+              updatedAt: new Date(),
+            });
+          }
+          console.log(`Marked subscription ${subscriptionId} as canceled.`);
+        }
+        break;
+      }
+
+      default:
+        console.log(`Unhandled Stripe event type: ${event.type}`);
     }
-
-    // Defensive extraction preventing the undefined crash
-    const latestInvoice = subscription?.latest_invoice;
-    const invoiceObj = typeof latestInvoice === 'object' ? latestInvoice as Stripe.Invoice : null;
-    const paymentIntent = invoiceObj?.payment_intent;
-    const paymentIntentObj = typeof paymentIntent === 'object' ? paymentIntent as Stripe.PaymentIntent : null;
-
-    const clientSecret = paymentIntentObj?.client_secret;
-
-    if (!clientSecret) {
-      return NextResponse.json(
-        { error: 'Failed to generate payment intent client secret from Stripe.' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      subscriptionId: subscription.id,
-      clientSecret: clientSecret,
-    });
-
-  } catch (err: any) {
-    console.error('Subscription API Error:', err);
-    return NextResponse.json(
-      { error: err.message || 'Failed to process subscription' },
-      { status: 500 }
-    );
+  } catch (dbErr: any) {
+    console.error('Error updating Firestore in webhook:', dbErr);
+    return NextResponse.json({ error: 'Database update failed' }, { status: 500 });
   }
+
+  return NextResponse.json({ received: true }, { status: 200 });
 }
