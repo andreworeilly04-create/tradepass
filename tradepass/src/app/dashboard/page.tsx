@@ -61,7 +61,7 @@ interface Worker {
 }
 
 function formatDateString(dateStr?: string): string {
-  if (!dateStr) return 'N/A';
+  if (!dateStr) return 'No Expiration';
   const parts = dateStr.split('-');
   if (parts.length !== 3) return dateStr;
   const [year, month, day] = parts;
@@ -279,8 +279,8 @@ export default function DashboardPage() {
         digestText += `${index + 1}. WORKER: ${w.name.toUpperCase()}\n`;
         digestText += `   - Trade & Role: ${w.trade || 'General'} — ${w.role}\n`;
         digestText += `   - Compliance Status: [${w.status?.toUpperCase()}]\n`;
-        digestText += `   - OSHA Cert Number: ${w.oshaCertNumber || 'N/A'}\n`;
-        digestText += `   - OSHA Expiration Date: ${formatDateString(w.oshaExpDate)}\n`;
+        digestText += `   - Credential / License Number: ${w.oshaCertNumber || 'N/A'}\n`;
+        digestText += `   - Expiration Date: ${formatDateString(w.oshaExpDate)}\n`;
         digestText += `   - Attached Verification Document: ${w.fileName || 'None'}\n`;
         digestText += `---------------------------------------------------\n`;
       });
@@ -706,7 +706,7 @@ export default function DashboardPage() {
                     <th className="px-6 py-3">Worker Name</th>
                     <th className="px-6 py-3">Trade / Role</th>
                     <th className="px-6 py-3">Compliance Status</th>
-                    <th className="px-6 py-3">OSHA Expiration</th>
+                    <th className="px-6 py-3">Expiration Date</th>
                     <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -802,7 +802,7 @@ export default function DashboardPage() {
                   </div>
 
                   <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">OSHA Card Number</span>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Credential / License Number</span>
                     <span className="font-mono text-white bg-slate-900 px-2 py-1 rounded border border-slate-800 text-xs inline-block mt-0.5">
                       {workerDetailsModal.oshaCertNumber || 'N/A'}
                     </span>
@@ -954,11 +954,11 @@ export default function DashboardPage() {
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    OSHA Card Number
+                    Credential / License Number
                   </label>
                   <input 
                     type="text" 
-                    placeholder="e.g. OSHA-30-99482"
+                    placeholder="e.g. OSHA-30-99482 or LIC-88412"
                     value={oshaCertNumber}
                     onChange={(e) => setOshaCertNumber(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
@@ -966,12 +966,14 @@ export default function DashboardPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    OSHA Card Expiration Date
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      Expiration Date
+                    </label>
+                    <span className="text-[11px] text-slate-500">Optional if non-expiring</span>
+                  </div>
                   <input 
                     type="date" 
-                    required
                     value={oshaExpDate}
                     onChange={(e) => setOshaExpDate(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
