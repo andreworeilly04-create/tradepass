@@ -5,9 +5,9 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
-import { Check, CheckCircle2, ArrowRight, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, ArrowRight, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
@@ -69,7 +69,7 @@ function CheckoutForm({ clientSecret, tierName, onBack }: { clientSecret: string
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-400 hover:text-white transition"
+          className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-400 hover:text-white transition cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Tier Selection</span>
@@ -126,11 +126,9 @@ function SignupFormContent() {
     setError('');
 
     try {
-      // 1. Create Firebase Auth user
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const uid = userCredential.user.uid;
 
-      // 2. Request Stripe setup intent/subscription from backend API
       const res = await fetch('/api/create-subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -149,7 +147,6 @@ function SignupFormContent() {
       const tierName = selectedTierObj?.name || 'Standard Crew';
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
 
-      // 3. Save initial user document in Firestore
       await setDoc(doc(db, 'users', uid), {
         companyName,
         email,
@@ -160,7 +157,6 @@ function SignupFormContent() {
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      // 4. If clientSecret is returned, trigger the Payment Element view
       if (data.clientSecret) {
         setClientSecret(data.clientSecret);
         return;
@@ -183,8 +179,12 @@ function SignupFormContent() {
         
         {/* Header Branding */}
         <div className="text-center mb-10">
-          <Link href="/" className="inline-block text-2xl font-extrabold text-white tracking-tight mb-2">
-            Trade<span className="text-blue-500">Pass</span>
+          <Link href="/" className="inline-block mb-4">
+            <img
+              src="/TradePass-logo.png"
+              alt="TradePass Logo"
+              className="h-14 sm:h-16 w-auto mx-auto object-contain"
+            />
           </Link>
           <h1 className="text-2xl sm:text-3xl font-bold text-white">Secure Your Crew&apos;s Compliance</h1>
           <p className="text-sm text-slate-400 mt-1">Select your plan and create your command center in under 3 minutes.</p>
