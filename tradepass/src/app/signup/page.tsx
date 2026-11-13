@@ -126,8 +126,14 @@ function SignupFormContent() {
     setError('');
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const uid = userCredential.user.uid;
+      // Check if user is already logged in (e.g. coming from Dashboard "Change Tier")
+      let uid = auth.currentUser?.uid;
+
+      if (!uid) {
+        // If not logged in, create a brand-new Firebase Auth account
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        uid = userCredential.user.uid;
+      }
 
       const res = await fetch('/api/create-subscription', {
         method: 'POST',
@@ -147,6 +153,7 @@ function SignupFormContent() {
       const tierName = selectedTierObj?.name || 'Standard Crew';
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
 
+      // Safely update or create the user document without wiping out existing profile data
       await setDoc(doc(db, 'users', uid), {
         companyName,
         email,
@@ -154,7 +161,7 @@ function SignupFormContent() {
         maxWorkers: maxWorkersLimit,
         subscriptionId: data.subscriptionId,
         subscriptionStatus: 'active',
-        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       }, { merge: true });
 
       if (data.clientSecret) {
@@ -164,8 +171,8 @@ function SignupFormContent() {
 
       router.push('/dashboard');
     } catch (err: any) {
-      console.error('Signup error:', err);
-      setError(err.message || 'Failed to create account. Please try again.');
+      console.error('Signup/Tier change error:', err);
+      setError(err.message || 'Failed to update plan. Please try again.');
     } finally {
       setLoading(false);
     }
