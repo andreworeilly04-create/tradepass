@@ -126,14 +126,28 @@ function SignupFormContent() {
     setError('');
 
     try {
-      // Check if user is already logged in (e.g. coming from Dashboard "Change Tier")
+      // Check if user is already authenticated (e.g. changing tiers from dashboard)
       let uid = auth.currentUser?.uid;
 
       if (!uid) {
-        // If not logged in, create a brand-new Firebase Auth account
+        // Create brand-new user account if not already logged in
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         uid = userCredential.user.uid;
       }
+
+      const selectedTierObj = TIERS.find(t => t.id === selectedPriceId);
+      const tierName = selectedTierObj?.name || 'Standard Crew';
+      const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
+
+      // Save user information to Firestore immediately before initializing payment intent
+      await setDoc(doc(db, 'users', uid), {
+        companyName,
+        email,
+        planTier: tierName,
+        maxWorkers: maxWorkersLimit,
+        subscriptionStatus: 'active',
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
 
       const res = await fetch('/api/create-subscription', {
         method: 'POST',
@@ -149,20 +163,11 @@ function SignupFormContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
-      const selectedTierObj = TIERS.find(t => t.id === selectedPriceId);
-      const tierName = selectedTierObj?.name || 'Standard Crew';
-      const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
-
-      // Safely update or create the user document without wiping out existing profile data
-      await setDoc(doc(db, 'users', uid), {
-        companyName,
-        email,
-        planTier: tierName,
-        maxWorkers: maxWorkersLimit,
-        subscriptionId: data.subscriptionId,
-        subscriptionStatus: 'active',
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
+      if (data.subscriptionId) {
+        await setDoc(doc(db, 'users', uid), {
+          subscriptionId: data.subscriptionId
+        }, { merge: true });
+      }
 
       if (data.clientSecret) {
         setClientSecret(data.clientSecret);
