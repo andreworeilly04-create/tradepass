@@ -1,7 +1,19 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+
+if (!getApps().length) {
+  initializeApp({
+    credential: cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    }),
+  });
+}
+
+const db = getFirestore();
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-10-28.endive',
@@ -18,7 +30,6 @@ export async function POST(req: Request) {
 
   try {
     const bodyText = await req.text();
-    
     event = stripe.webhooks.constructEvent(
       bodyText,
       signature,
@@ -33,8 +44,6 @@ export async function POST(req: Request) {
     switch (event.type) {
       case 'invoice.payment_succeeded': {
         const invoice = event.data.object as Stripe.Invoice;
-        
-        // Safely extract subscription ID whether it's a string, object, or null
         const subField = (invoice as any)?.subscription;
         const subscriptionId = typeof subField === 'string' 
           ? subField 
@@ -42,21 +51,19 @@ export async function POST(req: Request) {
             ? (subField as any).id 
             : null;
 
-        if (!subscriptionId) {
-          break; // Normal for non-subscription invoices
-        }
+        if (!subscriptionId) break;
 
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
-        const querySnapshot = await getDocs(q);
+        const usersSnapshot = await db.collection('users').where('subscriptionId', '==', subscriptionId).get();
 
-        if (!querySnapshot.empty) {
-          for (const userDoc of querySnapshot.docs) {
-            await updateDoc(doc(db, 'users', userDoc.id), {
+        if (!usersSnapshot.empty) {
+          const batch = db.batch();
+          usersSnapshot.docs.forEach((userDoc) => {
+            batch.update(userDoc.ref, {
               subscriptionStatus: 'active',
-              updatedAt: new Date(),
+              updatedAt: FieldValue.serverTimestamp(),
             });
-          }
+          });
+          await batch.commit();
           console.log(`Successfully activated subscription for sub ID: ${subscriptionId}`);
         }
         break;
@@ -69,18 +76,18 @@ export async function POST(req: Request) {
 
         if (!subscriptionId || !status) break;
 
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
-        const querySnapshot = await getDocs(q);
+        const usersSnapshot = await db.collection('users').where('subscriptionId', '==', subscriptionId).get();
 
-        if (!querySnapshot.empty) {
-          for (const userDoc of querySnapshot.docs) {
-            await updateDoc(doc(db, 'users', userDoc.id), {
+        if (!usersSnapshot.empty) {
+          const batch = db.batch();
+          usersSnapshot.docs.forEach((userDoc) => {
+            batch.update(userDoc.ref, {
               subscriptionStatus: status,
               cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
-              updatedAt: new Date(),
+              updatedAt: FieldValue.serverTimestamp(),
             });
-          }
+          });
+          await batch.commit();
           console.log(`Updated subscription ${subscriptionId} status to: ${status}`);
         }
         break;
@@ -92,18 +99,18 @@ export async function POST(req: Request) {
 
         if (!subscriptionId) break;
 
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
-        const querySnapshot = await getDocs(q);
+        const usersSnapshot = await db.collection('users').where('subscriptionId', '==', subscriptionId).get();
 
-        if (!querySnapshot.empty) {
-          for (const userDoc of querySnapshot.docs) {
-            await updateDoc(doc(db, 'users', userDoc.id), {
+        if (!usersSnapshot.empty) {
+          const batch = db.batch();
+          usersSnapshot.docs.forEach((userDoc) => {
+            batch.update(userDoc.ref, {
               subscriptionStatus: 'canceled',
               cancelAtPeriodEnd: false,
-              updatedAt: new Date(),
+              updatedAt: FieldValue.serverTimestamp(),
             });
-          }
+          });
+          await batch.commit();
           console.log(`Marked subscription ${subscriptionId} as canceled.`);
         }
         break;
@@ -113,8 +120,8 @@ export async function POST(req: Request) {
         console.log(`Unhandled Stripe event type: ${event.type}`);
     }
   } catch (dbErr: any) {
-    console.error('Error updating Firestore in webhook:', dbErr);
-    return NextResponse.json({ error: 'Database update failed' }, { status: 500 });
+    console.error('Firebase Admin Webhook Error:', dbErr);
+    return NextResponse.json({ error: `Database update failed: ${dbErr.message}` }, { status: 500 });
   }
 
   return NextResponse.json({ received: true }, { status: 200 });
