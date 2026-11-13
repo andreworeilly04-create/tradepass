@@ -170,7 +170,7 @@ export default function SettingsPage() {
           <div>
             <button 
               onClick={() => router.push('/dashboard')}
-              className="text-xs text-slate-400 hover:text-white flex items-center space-x-1.5 transition mb-2"
+              className="text-xs text-slate-400 hover:text-white flex items-center space-x-1.5 transition mb-2 cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>Back to Command Center</span>
@@ -199,7 +199,7 @@ export default function SettingsPage() {
             </div>
             <button 
               onClick={() => setNotification(null)}
-              className="text-slate-400 hover:text-white transition p-1"
+              className="text-slate-400 hover:text-white transition p-1 cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
@@ -254,7 +254,7 @@ export default function SettingsPage() {
                 <button
                   onClick={() => handleToggleSubscription('resume')}
                   disabled={updatingSubscription}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-600/20 flex items-center space-x-1.5 disabled:opacity-50"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-600/20 flex items-center space-x-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${updatingSubscription ? 'animate-spin' : ''}`} />
                   <span>{updatingSubscription ? 'Resuming...' : 'Resume Subscription'}</span>
@@ -263,7 +263,7 @@ export default function SettingsPage() {
                 <button
                   onClick={() => handleToggleSubscription('cancel')}
                   disabled={updatingSubscription}
-                  className="bg-slate-800 hover:bg-rose-950/50 hover:text-rose-400 border border-slate-700 hover:border-rose-800/80 text-slate-300 font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center space-x-1.5 disabled:opacity-50"
+                  className="bg-slate-800 hover:bg-rose-950/50 hover:text-rose-400 border border-slate-700 hover:border-rose-800/80 text-slate-300 font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center space-x-1.5 disabled:opacity-50 cursor-pointer"
                 >
                   <XCircle className="w-3.5 h-3.5 text-rose-400" />
                   <span>{updatingSubscription ? 'Canceling...' : 'Cancel Subscription'}</span>
@@ -271,7 +271,7 @@ export default function SettingsPage() {
               ) : (
                 <button 
                   onClick={() => router.push('/signup')}
-                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-lg shadow-rose-600/20"
+                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-lg shadow-rose-600/20 cursor-pointer"
                 >
                   Renew Plan Now
                 </button>
@@ -279,7 +279,7 @@ export default function SettingsPage() {
 
               <button 
                 onClick={() => router.push('/signup')}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-lg shadow-blue-600/20"
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer"
               >
                 Change Tier
               </button>
@@ -369,7 +369,7 @@ export default function SettingsPage() {
               <button 
                 type="submit"
                 disabled={savingCompany}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center space-x-2 shadow-lg shadow-blue-600/20 disabled:opacity-50"
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition flex items-center space-x-2 shadow-lg shadow-blue-600/20 disabled:opacity-50 cursor-pointer"
               >
                 <Save className="w-4 h-4" />
                 <span>{savingCompany ? 'Saving...' : 'Save Changes'}</span>
