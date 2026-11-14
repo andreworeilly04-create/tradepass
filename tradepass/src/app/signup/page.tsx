@@ -214,9 +214,6 @@ function SignupFormContent() {
         return;
       }
 
-      // Otherwise, payment was already handled (e.g. reused test customer), route straight to dashboard
-      router.push('/dashboard');
-
     } catch (err: any) {
       setError(err.message);
     } finally {
