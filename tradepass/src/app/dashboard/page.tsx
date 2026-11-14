@@ -35,7 +35,7 @@ import {
   arrayUnion, 
   arrayRemove 
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
 interface UserProfile {
@@ -187,8 +187,9 @@ export default function DashboardPage() {
   const isAtCapacity = !isEnterpriseTier && totalActive >= maxWorkers;
   const brandColor = profile?.brandColor || '#0ea5e9';
 
-  const subscriptionStatus = profile?.subscriptionStatus || 'active';
-  const isSubscriptionExpired = subscriptionStatus === 'expired' || subscriptionStatus === 'canceled' || subscriptionStatus === 'past_due';
+  // STRICT ACCESS GATE: Only 'active' status grants full access
+  const subscriptionStatus = profile?.subscriptionStatus || 'free';
+  const isSubscriptionActive = subscriptionStatus === 'active';
 
   const handleSharePassport = async () => {
     if (!user?.uid) return;
@@ -413,35 +414,41 @@ export default function DashboardPage() {
     );
   }
 
+  // SUBSCRIPTION GATE VIEW: If not active, show subscription required paywall
+  if (!isSubscriptionActive) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center py-12 px-6 font-sans">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl text-center">
+          <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/30 rounded-2xl flex items-center justify-center mx-auto mb-5 text-blue-400 shadow-lg shadow-blue-500/10">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h1 className="text-2xl font-extrabold text-white mb-2">Subscription Required</h1>
+          <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+            Your TradePass account requires an active subscription to access job-site safety tracking, worker profiles, and compliance features. Please complete your checkout to activate your account.
+          </p>
+          <div className="space-y-3">
+            <button
+              onClick={() => router.push('/signup')}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-blue-600/20 cursor-pointer"
+            >
+              Choose Plan & Complete Checkout
+            </button>
+            <button
+              onClick={() => auth.signOut().then(() => router.push('/login'))}
+              className="w-full bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 w-full flex-grow">
-        
-        {/* Dynamic Expiration / Past-Due Alert Banner */}
-        {isSubscriptionExpired && (
-          <div className="mb-6 p-4 bg-rose-950/40 border border-rose-800/80 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4 text-rose-300 text-sm shadow-xl">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-rose-900/50 rounded-xl border border-rose-700/50 flex-shrink-0">
-                <AlertTriangle className="w-5 h-5 text-rose-400" />
-              </div>
-              <div>
-                <h4 className="font-bold text-white">Your TradePass plan has expired</h4>
-                <p className="text-xs text-rose-300/80 mt-0.5">
-                  {subscriptionStatus === 'past_due'
-                    ? 'Your recent subscription auto-payment failed. Please update your payment details to reactivate.'
-                    : 'Your subscription cycle ended. Renew your plan to reactivate public clearance links and worker tracking.'}
-                </p>
-              </div>
-            </div>
-            <button 
-              onClick={() => router.push('/signup')}
-              className="w-full sm:w-auto bg-rose-600 hover:bg-rose-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition shadow-lg shadow-rose-600/20 flex-shrink-0 cursor-pointer whitespace-nowrap"
-            >
-              Renew Subscription
-            </button>
-          </div>
-        )}
 
         {/* Navigation & Company Branding Header */}
         <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800/80 pb-6">

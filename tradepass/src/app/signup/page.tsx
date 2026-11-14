@@ -65,7 +65,6 @@ function CheckoutForm({ clientSecret, tierName, onBack }: { clientSecret: string
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  // Referencing clientSecret here explicitly so it is actively used and un-dimmed in your editor
   console.log("Active Payment Session Client Secret Present:", Boolean(clientSecret));
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -202,17 +201,17 @@ function SignupFormContent() {
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
       const tierNameObj = TIERS.find(t => t.id === selectedPriceId)?.name || 'Standard Crew';
 
+      // FIX: Set subscriptionStatus to 'free' on client creation so backing out doesn't grant access
       await setDoc(doc(db, 'users', uid), {
         companyName,
         email,
         planTier: tierNameObj,
         maxWorkers: maxWorkersLimit,
         subscriptionId: data.subscriptionId,
-        subscriptionStatus: 'incomplete',
+        subscriptionStatus: 'free',
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      // Pass clientSecret to trigger the form transition
       setClientSecret(data.clientSecret);
 
     } catch (err: any) {
