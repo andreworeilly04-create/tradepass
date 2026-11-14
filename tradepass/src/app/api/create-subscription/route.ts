@@ -19,6 +19,41 @@ export async function POST(req: Request) {
     // SCENARIO A: User is changing tiers -> Force payment input collection
     if (subscriptionId) {
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+      // FIX: If the subscription is stuck in 'incomplete' status from a previous abandoned checkout,
+      // cancel it so we can create a fresh subscription instead of failing on update.
+      if (subscription.status === 'incomplete') {
+        await stripe.subscriptions.cancel(subscriptionId);
+        console.log(`Canceled abandoned incomplete subscription during tier change: ${subscriptionId}`);
+
+        // Create a brand new subscription for this customer with the new tier
+        const newSubscription = await stripe.subscriptions.create({
+          customer: subscription.customer as string,
+          items: [{ price: priceId }],
+          payment_behavior: 'default_incomplete',
+          payment_settings: {
+            save_default_payment_method: 'on_subscription',
+          },
+          expand: ['latest_invoice.payment_intent', 'pending_setup_intent'],
+        });
+
+        let clientSecret: string | null = null;
+        const latestInv = newSubscription.latest_invoice as any;
+        if (latestInv && typeof latestInv === 'object' && latestInv.payment_intent) {
+          clientSecret = (latestInv.payment_intent as any).client_secret;
+        }
+        if (!clientSecret && newSubscription.pending_setup_intent) {
+          clientSecret = (newSubscription.pending_setup_intent as any).client_secret;
+        }
+
+        return NextResponse.json({
+          success: true,
+          subscriptionId: newSubscription.id,
+          clientSecret,
+        });
+      }
+
+      // Otherwise, it's an active/valid subscription, so safe to update with proration
       const subscriptionItemId = subscription.items.data[0].id;
 
       const updatedSubscription = await stripe.subscriptions.update(subscriptionId, {
@@ -37,7 +72,6 @@ export async function POST(req: Request) {
       });
 
       let clientSecret: string | null = null;
-
       const latestInvoice = updatedSubscription.latest_invoice as any;
       if (latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
         const pi = latestInvoice.payment_intent as any;
