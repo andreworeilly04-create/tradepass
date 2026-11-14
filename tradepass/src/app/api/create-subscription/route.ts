@@ -66,6 +66,18 @@ export async function POST(req: Request) {
         name: companyName,
         metadata: { firebaseUID: uid },
       });
+    } else {
+      // CLEANUP: Cancel any lingering incomplete subscriptions from previous abandoned checkouts
+      const existingSubs = await stripe.subscriptions.list({
+        customer: customer.id,
+        status: 'incomplete',
+        limit: 10,
+      });
+
+      for (const sub of existingSubs.data) {
+        await stripe.subscriptions.cancel(sub.id);
+        console.log(`Canceled old abandoned incomplete subscription: ${sub.id}`);
+      }
     }
 
     const subscription = await stripe.subscriptions.create({

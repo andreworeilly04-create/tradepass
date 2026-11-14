@@ -76,6 +76,12 @@ export async function POST(req: Request) {
 
         if (!subscriptionId || !status) break;
 
+        // Ignore incomplete states so abandoned checkouts do not grant paid access
+        if (status === 'incomplete' || status === 'incomplete_expired') {
+          console.log(`Skipping status update for incomplete subscription: ${subscriptionId}`);
+          break;
+        }
+
         const usersSnapshot = await db.collection('users').where('subscriptionId', '==', subscriptionId).get();
 
         if (!usersSnapshot.empty) {
