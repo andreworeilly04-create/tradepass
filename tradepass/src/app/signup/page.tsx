@@ -192,25 +192,28 @@ function SignupFormContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
+      // Prevent bypass if clientSecret is missing from the backend response
+      if (!data.clientSecret) {
+        throw new Error('Failed to generate payment session. Please try again.');
+      }
+
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
       const tierNameObj = TIERS.find(t => t.id === selectedPriceId)?.name || 'Standard Crew';
 
+      // Save as 'incomplete' until payment confirmation succeeds
       await setDoc(doc(db, 'users', uid), {
         companyName,
         email,
         planTier: tierNameObj,
         maxWorkers: maxWorkersLimit,
         subscriptionId: data.subscriptionId,
-        subscriptionStatus: 'active',
+        subscriptionStatus: 'incomplete',
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      if (data.clientSecret) {
-        setClientSecret(data.clientSecret);
-        return;
-      }
+      // Trigger the Stripe Payment Element view securely
+      setClientSecret(data.clientSecret);
 
-      router.push('/dashboard');
     } catch (err: any) {
       setError(err.message);
     } finally {
