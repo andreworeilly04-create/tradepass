@@ -201,14 +201,14 @@ function SignupFormContent() {
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
       const tierNameObj = TIERS.find(t => t.id === selectedPriceId)?.name || 'Standard Crew';
 
-      // FIX: Set subscriptionStatus to 'free' on client creation so backing out doesn't grant access
+      // FIX: Removed eager 'subscriptionStatus: free' overwrite so backing out doesn't lock out the user.
+      // Stripe webhooks will handle setting status to active/paid once payment succeeds.
       await setDoc(doc(db, 'users', uid), {
         companyName,
         email,
         planTier: tierNameObj,
         maxWorkers: maxWorkersLimit,
         subscriptionId: data.subscriptionId,
-        subscriptionStatus: 'free',
         createdAt: serverTimestamp(),
       }, { merge: true });
 
@@ -241,7 +241,7 @@ function SignupFormContent() {
                 {isLoggedInUser ? 'Change Subscription Tier' : 'Secure Your Job-Site'}
               </h1>
               <p className="text-sm text-slate-400">
-                {isLoggedInUser ? 'Select your new plan tier below. Card re-verification is required.' : 'Choose your crew tier and create your TradePass account.'}
+                {isLoggedInUser ? 'Select your new plan tier below. Card re-verification is required if needed.' : 'Choose your crew tier and create your TradePass account.'}
               </p>
             </div>
 

@@ -23,24 +23,27 @@ export async function POST(req: Request) {
       cancel_at_period_end: true,
     });
 
-    // Optionally sync the cancellation status immediately in Firestore
+    // Sync the cancellation status immediately in Firestore
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
     const querySnapshot = await getDocs(q);
 
     if (!querySnapshot.empty) {
-      querySnapshot.forEach(async (userDoc) => {
-        await updateDoc(doc(db, 'users', userDoc.id), {
+      // Use Promise.all to properly await Firestore document updates
+      const updatePromises = querySnapshot.docs.map((userDoc) =>
+        updateDoc(doc(db, 'users', userDoc.id), {
           cancelAtPeriodEnd: subscription.cancel_at_period_end,
           updatedAt: new Date(),
-        });
-      });
+        })
+      );
+      
+      await Promise.all(updatePromises);
     }
 
     return NextResponse.json({
       success: true,
-      subscriptionStatus: subscription.status,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      subscriptionStatus: subscription.status, // This will remain 'active' in Stripe until the period ends
+      cancelAtPeriodEnd: subscription.cancel_at_period_end, // This will be true
     });
   } catch (err: any) {
     console.error('Cancel Subscription Error:', err);

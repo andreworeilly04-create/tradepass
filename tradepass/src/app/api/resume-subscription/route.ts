@@ -29,12 +29,15 @@ export async function POST(req: Request) {
     const querySnapshot = await getDocs(q);
 
     if (!querySnapshot.empty) {
-      querySnapshot.forEach(async (userDoc) => {
-        await updateDoc(doc(db, 'users', userDoc.id), {
-          cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      // Use Promise.all to properly await Firestore document updates
+      const updatePromises = querySnapshot.docs.map((userDoc) =>
+        updateDoc(doc(db, 'users', userDoc.id), {
+          cancelAtPeriodEnd: subscription.cancel_at_period_end, // Will be false
           updatedAt: new Date(),
-        });
-      });
+        })
+      );
+
+      await Promise.all(updatePromises);
     }
 
     return NextResponse.json({

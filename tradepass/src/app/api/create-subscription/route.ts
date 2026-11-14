@@ -16,17 +16,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // SCENARIO A: User is changing tiers -> Force payment input collection
+    // SCENARIO A: User is changing tiers
     if (subscriptionId) {
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-      // FIX: If the subscription is stuck in 'incomplete' status from a previous abandoned checkout,
+      // FIX 1: If the subscription is stuck in 'incomplete' status from a previous abandoned checkout,
       // cancel it so we can create a fresh subscription instead of failing on update.
       if (subscription.status === 'incomplete') {
         await stripe.subscriptions.cancel(subscriptionId);
         console.log(`Canceled abandoned incomplete subscription during tier change: ${subscriptionId}`);
 
-        // Create a brand new subscription for this customer with the new tier
         const newSubscription = await stripe.subscriptions.create({
           customer: subscription.customer as string,
           items: [{ price: priceId }],
@@ -53,7 +52,8 @@ export async function POST(req: Request) {
         });
       }
 
-      // Otherwise, it's an active/valid subscription, so safe to update with proration
+      // FIX 2: For existing active subscriptions (upgrades/downgrades), use standard prorations
+      // without forcing payment collection unless an actual charge/action is required.
       const subscriptionItemId = subscription.items.data[0].id;
 
       const updatedSubscription = await stripe.subscriptions.update(subscriptionId, {
@@ -63,30 +63,25 @@ export async function POST(req: Request) {
             price: priceId,
           },
         ],
-        proration_behavior: 'always_invoice',
-        payment_behavior: 'default_incomplete',
-        payment_settings: {
-          save_default_payment_method: 'on_subscription',
-        },
-        expand: ['latest_invoice.payment_intent', 'pending_setup_intent'],
+        proration_behavior: 'create_prorations',
+        expand: ['latest_invoice.payment_intent'],
       });
 
       let clientSecret: string | null = null;
       const latestInvoice = updatedSubscription.latest_invoice as any;
+      
       if (latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
         const pi = latestInvoice.payment_intent as any;
-        clientSecret = pi.client_secret;
-      }
-
-      if (!clientSecret && updatedSubscription.pending_setup_intent) {
-        const si = updatedSubscription.pending_setup_intent as any;
-        clientSecret = si.client_secret;
+        // Only require payment/card entry if Stripe explicitly needs payment or action (e.g., upgrades)
+        if (pi.status === 'requires_action' || pi.status === 'requires_payment_method') {
+          clientSecret = pi.client_secret;
+        }
       }
 
       return NextResponse.json({
         success: true,
         subscriptionId: updatedSubscription.id,
-        clientSecret,
+        clientSecret, // Will be null on downgrades, allowing instant success without card prompts!
       });
     }
 
