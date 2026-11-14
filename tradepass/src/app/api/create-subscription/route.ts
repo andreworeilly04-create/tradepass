@@ -5,43 +5,6 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-10-28.endive',
 });
 
-// Helper function to robustly extract client_secret from either payment_intent OR setup_intent
-async function getClientSecretFromInvoice(latestInvoice: string | Stripe.Invoice | null): Promise<string | null> {
-  if (!latestInvoice) return null;
-
-  let invoiceObj: Stripe.Invoice;
-
-  if (typeof latestInvoice === 'string') {
-    invoiceObj = await stripe.invoices.retrieve(latestInvoice, {
-      expand: ['payment_intent', 'setup_intent'],
-    });
-  } else {
-    invoiceObj = latestInvoice;
-  }
-
-  // 1. Check for payment_intent client_secret
-  const pi = (invoiceObj as any).payment_intent;
-  if (pi && typeof pi === 'object' && 'client_secret' in pi && pi.client_secret) {
-    return pi.client_secret;
-  }
-  if (typeof pi === 'string') {
-    const fetchedPi = await stripe.paymentIntents.retrieve(pi);
-    if (fetchedPi.client_secret) return fetchedPi.client_secret;
-  }
-
-  // 2. Fallback: Check for setup_intent client_secret (common on zero-dollar or initial trial/setup flows)
-  const si = (invoiceObj as any).setup_intent;
-  if (si && typeof si === 'object' && 'client_secret' in si && si.client_secret) {
-    return si.client_secret;
-  }
-  if (typeof si === 'string') {
-    const fetchedSi = await stripe.setupIntents.retrieve(si);
-    if (fetchedSi.client_secret) return fetchedSi.client_secret;
-  }
-
-  return null;
-}
-
 export async function POST(req: Request) {
   try {
     const { email, companyName, priceId, uid, subscriptionId } = await req.json();
@@ -70,10 +33,21 @@ export async function POST(req: Request) {
         payment_settings: {
           save_default_payment_method: 'on_subscription',
         },
-        expand: ['latest_invoice.payment_intent', 'latest_invoice.setup_intent'],
+        expand: ['latest_invoice.payment_intent', 'pending_setup_intent'],
       });
 
-      const clientSecret = await getClientSecretFromInvoice(updatedSubscription.latest_invoice);
+      let clientSecret: string | null = null;
+
+      const latestInvoice = updatedSubscription.latest_invoice as any;
+      if (latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
+        const pi = latestInvoice.payment_intent as any;
+        clientSecret = pi.client_secret;
+      }
+
+      if (!clientSecret && updatedSubscription.pending_setup_intent) {
+        const si = updatedSubscription.pending_setup_intent as any;
+        clientSecret = si.client_secret;
+      }
 
       return NextResponse.json({
         success: true,
@@ -101,10 +75,21 @@ export async function POST(req: Request) {
       payment_settings: {
         save_default_payment_method: 'on_subscription',
       },
-      expand: ['latest_invoice.payment_intent', 'latest_invoice.setup_intent'],
+      expand: ['latest_invoice.payment_intent', 'pending_setup_intent'],
     });
 
-    const clientSecret = await getClientSecretFromInvoice(subscription.latest_invoice);
+    let clientSecret: string | null = null;
+
+    const latestInvoice = subscription.latest_invoice as any;
+    if (latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
+      const pi = latestInvoice.payment_intent as any;
+      clientSecret = pi.client_secret;
+    }
+
+    if (!clientSecret && subscription.pending_setup_intent) {
+      const si = subscription.pending_setup_intent as any;
+      clientSecret = si.client_secret;
+    }
 
     return NextResponse.json({
       success: true,
