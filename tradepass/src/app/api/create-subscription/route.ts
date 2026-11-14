@@ -5,6 +5,33 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-10-28.endive',
 });
 
+// Helper function to robustly extract client_secret from an invoice (handles string IDs or expanded objects)
+async function getClientSecretFromInvoice(latestInvoice: string | Stripe.Invoice | null): Promise<string | null> {
+  if (!latestInvoice) return null;
+
+  let invoiceObj: Stripe.Invoice;
+
+  if (typeof latestInvoice === 'string') {
+    invoiceObj = await stripe.invoices.retrieve(latestInvoice, {
+      expand: ['payment_intent'],
+    });
+  } else {
+    invoiceObj = latestInvoice;
+  }
+
+  const pi = (invoiceObj as any).payment_intent;
+  if (pi && typeof pi === 'object' && 'client_secret' in pi) {
+    return pi.client_secret;
+  }
+
+  if (typeof pi === 'string') {
+    const fetchedPi = await stripe.paymentIntents.retrieve(pi);
+    return fetchedPi.client_secret;
+  }
+
+  return null;
+}
+
 export async function POST(req: Request) {
   try {
     const { email, companyName, priceId, uid, subscriptionId } = await req.json();
@@ -21,7 +48,6 @@ export async function POST(req: Request) {
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
       const subscriptionItemId = subscription.items.data[0].id;
 
-      // Update subscription and force a new payment intent generation via invoice
       const updatedSubscription = await stripe.subscriptions.update(subscriptionId, {
         items: [
           {
@@ -30,20 +56,19 @@ export async function POST(req: Request) {
           },
         ],
         proration_behavior: 'always_invoice',
-        payment_behavior: 'default_incomplete', // Forces the invoice to be incomplete until paid
+        payment_behavior: 'default_incomplete',
         payment_settings: {
           save_default_payment_method: 'on_subscription',
         },
         expand: ['latest_invoice.payment_intent'],
       });
 
-      const invoice = updatedSubscription.latest_invoice as Stripe.Invoice as any;
-      const paymentIntent = invoice?.payment_intent as Stripe.PaymentIntent;
+      const clientSecret = await getClientSecretFromInvoice(updatedSubscription.latest_invoice);
 
       return NextResponse.json({
         success: true,
         subscriptionId: updatedSubscription.id,
-        clientSecret: paymentIntent?.client_secret, // Always returns the clientSecret to trigger the payment form
+        clientSecret,
       });
     }
 
@@ -69,12 +94,12 @@ export async function POST(req: Request) {
       expand: ['latest_invoice.payment_intent'],
     });
 
-    const invoice = subscription.latest_invoice as Stripe.Invoice as any;
-    const paymentIntent = invoice.payment_intent as Stripe.PaymentIntent;
+    const clientSecret = await getClientSecretFromInvoice(subscription.latest_invoice);
 
     return NextResponse.json({
+      success: true,
       subscriptionId: subscription.id,
-      clientSecret: paymentIntent.client_secret,
+      clientSecret,
     });
 
   } catch (err: any) {
