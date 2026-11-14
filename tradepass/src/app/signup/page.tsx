@@ -65,6 +65,9 @@ function CheckoutForm({ clientSecret, tierName, onBack }: { clientSecret: string
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // Referencing clientSecret here explicitly so it is actively used and un-dimmed in your editor
+  console.log("Active Payment Session Client Secret Present:", Boolean(clientSecret));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!stripe || !elements) return;
@@ -192,11 +195,12 @@ function SignupFormContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
+      if (!data.clientSecret) {
+        throw new Error('Stripe did not return a payment session. Please use a fresh test email.');
+      }
+
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
       const tierNameObj = TIERS.find(t => t.id === selectedPriceId)?.name || 'Standard Crew';
-
-      // Set subscription status to 'incomplete' if a clientSecret needs payment collection, otherwise 'active'
-      const subscriptionStatus = data.clientSecret ? 'incomplete' : 'active';
 
       await setDoc(doc(db, 'users', uid), {
         companyName,
@@ -204,15 +208,12 @@ function SignupFormContent() {
         planTier: tierNameObj,
         maxWorkers: maxWorkersLimit,
         subscriptionId: data.subscriptionId,
-        subscriptionStatus,
+        subscriptionStatus: 'incomplete',
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      // If Stripe requires payment details, render the PaymentElement form
-      if (data.clientSecret) {
-        setClientSecret(data.clientSecret);
-        return;
-      }
+      // Pass clientSecret to trigger the form transition
+      setClientSecret(data.clientSecret);
 
     } catch (err: any) {
       setError(err.message);
