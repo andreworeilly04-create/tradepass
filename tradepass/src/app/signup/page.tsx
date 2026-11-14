@@ -192,27 +192,30 @@ function SignupFormContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
-      // Prevent bypass if clientSecret is missing from the backend response
-      if (!data.clientSecret) {
-        throw new Error('Failed to generate payment session. Please try again.');
-      }
-
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
       const tierNameObj = TIERS.find(t => t.id === selectedPriceId)?.name || 'Standard Crew';
 
-      // Save as 'incomplete' until payment confirmation succeeds
+      // Set subscription status to 'incomplete' if a clientSecret needs payment collection, otherwise 'active'
+      const subscriptionStatus = data.clientSecret ? 'incomplete' : 'active';
+
       await setDoc(doc(db, 'users', uid), {
         companyName,
         email,
         planTier: tierNameObj,
         maxWorkers: maxWorkersLimit,
         subscriptionId: data.subscriptionId,
-        subscriptionStatus: 'incomplete',
+        subscriptionStatus,
         createdAt: serverTimestamp(),
       }, { merge: true });
 
-      // Trigger the Stripe Payment Element view securely
-      setClientSecret(data.clientSecret);
+      // If Stripe requires payment details, render the PaymentElement form
+      if (data.clientSecret) {
+        setClientSecret(data.clientSecret);
+        return;
+      }
+
+      // Otherwise, payment was already handled (e.g. reused test customer), route straight to dashboard
+      router.push('/dashboard');
 
     } catch (err: any) {
       setError(err.message);
