@@ -96,29 +96,30 @@ export default function SettingsPage() {
     }
   };
 
-  // Toggle Subscription Cancellation State
+  // Securely call server API endpoints to toggle subscription status (bypasses client permissions)
   const handleToggleSubscription = async (targetAction: 'cancel' | 'resume') => {
     if (!user) return;
 
     try {
       setUpdatingSubscription(true);
 
-      // Call the correct API endpoint if subscriptionId is present
-      if (profile?.subscriptionId) {
-        const endpoint = targetAction === 'cancel' ? '/api/cancel-subscription' : '/api/resume-subscription';
-        
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subscriptionId: profile.subscriptionId,
-          }),
-        });
+      if (!profile?.subscriptionId) {
+        throw new Error('No active subscription ID found on your profile.');
+      }
 
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || 'Failed to update subscription on Stripe');
-        }
+      const endpoint = targetAction === 'cancel' ? '/api/cancel-subscription' : '/api/resume-subscription';
+      
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subscriptionId: profile.subscriptionId,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to update subscription on Stripe');
       }
 
       showNotification(
