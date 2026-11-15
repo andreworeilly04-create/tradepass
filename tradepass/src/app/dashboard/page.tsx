@@ -188,10 +188,10 @@ export default function DashboardPage() {
   const isAtCapacity = !isEnterpriseTier && totalActive >= maxWorkers;
   const brandColor = profile?.brandColor || '#0ea5e9';
 
-  // ACCESS GATE: Grant full access if active OR if cancelAtPeriodEnd is true (prepaid period remaining)
+  // PERMISSIVE ACCESS GATE: If cancelAtPeriodEnd is true, ALWAYS grant full access regardless of subscriptionStatus changes
+  const cancelAtPeriodEnd = profile?.cancelAtPeriodEnd === true;
   const subscriptionStatus = profile?.subscriptionStatus || 'free';
-  const cancelAtPeriodEnd = profile?.cancelAtPeriodEnd || false;
-  const isSubscriptionActive = subscriptionStatus === 'active' || cancelAtPeriodEnd === true;
+  const isSubscriptionActive = cancelAtPeriodEnd || subscriptionStatus === 'active';
 
   const handleSharePassport = async () => {
     if (!user?.uid) return;
@@ -416,7 +416,7 @@ export default function DashboardPage() {
     );
   }
 
-  // SUBSCRIPTION GATE VIEW: If not active, show subscription required paywall
+  // SUBSCRIPTION GATE VIEW: If not active and not canceling, show subscription required paywall
   if (!isSubscriptionActive) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center py-12 px-6 font-sans">

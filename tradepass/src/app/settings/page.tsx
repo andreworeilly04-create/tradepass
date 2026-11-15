@@ -23,10 +23,11 @@ interface UserProfile {
   planTier?: string;
   maxWorkers?: number;
   subscriptionStatus?: string;
+  cancelAtPeriodEnd?: boolean;
   companyLogoUrl?: string;
   brandColor?: string;
   foremanEmails?: string[];
-  stripeSubscriptionId?: string;
+  subscriptionId?: string;
 }
 
 interface NotificationState {
@@ -102,27 +103,23 @@ export default function SettingsPage() {
     try {
       setUpdatingSubscription(true);
 
-      // Call API Endpoint if Stripe integration is set up
-      if (profile?.stripeSubscriptionId) {
-        const response = await fetch('/api/subscription/toggle', {
+      // Call the correct API endpoint if subscriptionId is present
+      if (profile?.subscriptionId) {
+        const endpoint = targetAction === 'cancel' ? '/api/cancel-subscription' : '/api/resume-subscription';
+        
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            subscriptionId: profile.stripeSubscriptionId,
-            action: targetAction,
+            subscriptionId: profile.subscriptionId,
           }),
         });
 
+        const data = await response.json();
         if (!response.ok) {
-          throw new Error('Failed to update subscription on Stripe');
+          throw new Error(data.error || 'Failed to update subscription on Stripe');
         }
       }
-
-      // Sync updated state directly with Firestore
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        subscriptionStatus: targetAction === 'cancel' ? 'canceling' : 'active',
-      });
 
       showNotification(
         'success', 
@@ -133,7 +130,7 @@ export default function SettingsPage() {
 
     } catch (err: any) {
       console.error(`Error trying to ${targetAction} subscription:`, err);
-      showNotification('error', `Could not ${targetAction} subscription. Please try again or contact support.`);
+      showNotification('error', err.message || `Could not ${targetAction} subscription. Please try again.`);
     } finally {
       setUpdatingSubscription(false);
     }
@@ -150,8 +147,8 @@ export default function SettingsPage() {
     : 'Crew Pro ($79/mo)';
 
   const subscriptionStatus = profile?.subscriptionStatus || 'active';
+  const cancelAtPeriodEnd = profile?.cancelAtPeriodEnd || false;
   const isExpired = subscriptionStatus === 'expired' || subscriptionStatus === 'canceled' || subscriptionStatus === 'past_due';
-  const isCanceling = subscriptionStatus === 'canceling';
 
   if (loading) {
     return (
@@ -215,14 +212,14 @@ export default function SettingsPage() {
                 className={`inline-flex items-center space-x-1.5 border text-xs px-3 py-1 rounded-full font-semibold mb-3 ${
                   isExpired
                     ? 'bg-rose-950/80 text-rose-400 border-rose-800/60'
-                    : isCanceling
+                    : cancelAtPeriodEnd
                     ? 'bg-amber-950/80 text-amber-400 border-amber-800/60'
                     : 'bg-blue-950 text-blue-400 border-blue-800/60'
                 }`}
               >
                 {isExpired ? (
                   <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                ) : isCanceling ? (
+                ) : cancelAtPeriodEnd ? (
                   <XCircle className="w-3.5 h-3.5 text-amber-400" />
                 ) : (
                   <CheckCircle2 className="w-3.5 h-3.5" />
@@ -230,7 +227,7 @@ export default function SettingsPage() {
                 <span>
                   {isExpired 
                     ? 'Your plan has expired' 
-                    : isCanceling 
+                    : cancelAtPeriodEnd 
                     ? 'Subscription Canceling (Active until end of period)' 
                     : 'Active Subscription'}
                 </span>
@@ -242,7 +239,7 @@ export default function SettingsPage() {
               <p className="text-sm text-slate-400 mt-1">
                 {isExpired 
                   ? 'Your account features and public GC links are temporarily locked. Renew to resume full access.' 
-                  : isCanceling
+                  : cancelAtPeriodEnd
                   ? 'Your subscription will not auto-renew at the end of the current billing cycle.'
                   : `Covers up to ${profile?.maxWorkers === 999 ? 'Unlimited' : profile?.maxWorkers || 10} active workers.`}
               </p>
@@ -250,7 +247,7 @@ export default function SettingsPage() {
 
             {/* Subscription Action Controls */}
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-              {isCanceling ? (
+              {cancelAtPeriodEnd ? (
                 <button
                   onClick={() => handleToggleSubscription('resume')}
                   disabled={updatingSubscription}
