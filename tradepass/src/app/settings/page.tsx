@@ -14,7 +14,7 @@ import {
   XCircle,
   X
 } from 'lucide-react';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
@@ -45,7 +45,6 @@ export default function SettingsPage() {
   const [companySaveSuccess, setCompanySaveSuccess] = useState(false);
   const [updatingSubscription, setUpdatingSubscription] = useState(false);
   
-  // Custom Inline Notification State
   const [notification, setNotification] = useState<NotificationState | null>(null);
 
   useEffect(() => {
@@ -82,21 +81,32 @@ export default function SettingsPage() {
 
     try {
       setSavingCompany(true);
-      const userRef = doc(db, 'users', user.uid);
-      await updateDoc(userRef, {
-        companyName: companyName.trim()
+      
+      // Routed securely through backend API to bypass client permission errors
+      const response = await fetch('/api/update-company', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: user.uid,
+          companyName: companyName.trim()
+        }),
       });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to update company name');
+      }
+
       setCompanySaveSuccess(true);
       setTimeout(() => setCompanySaveSuccess(false), 3000);
     } catch (err: any) {
       console.error("Error saving company name:", err);
-      showNotification('error', 'Failed to update company name. Please try again.');
+      showNotification('error', err.message || 'Failed to update company name. Please try again.');
     } finally {
       setSavingCompany(false);
     }
   };
 
-  // Securely call server API endpoints to toggle subscription status (bypasses client permissions)
   const handleToggleSubscription = async (targetAction: 'cancel' | 'resume') => {
     if (!user) return;
 
@@ -163,7 +173,6 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       <main className="max-w-4xl mx-auto px-6 py-8 w-full flex-grow">
         
-        {/* Top Header Navigation */}
         <div className="mb-6 flex items-center justify-between">
           <div>
             <button 
@@ -178,7 +187,6 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Global Notification Banner */}
         {notification && (
           <div 
             className={`mb-6 p-4 rounded-2xl border flex items-center justify-between shadow-xl text-sm transition ${
@@ -204,11 +212,9 @@ export default function SettingsPage() {
           </div>
         )}
 
-        {/* Dynamic Subscription Status & Plan Card */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
             <div>
-              {/* Status Badge */}
               <span 
                 className={`inline-flex items-center space-x-1.5 border text-xs px-3 py-1 rounded-full font-semibold mb-3 ${
                   isExpired
@@ -246,7 +252,6 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            {/* Subscription Action Controls */}
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
               {cancelAtPeriodEnd ? (
                 <button
@@ -283,46 +288,8 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
-
-          <div className="pt-6 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-            <div className="p-4 bg-slate-950/50 border border-slate-800 rounded-xl">
-              <div className="text-slate-400 mb-1 font-semibold uppercase tracking-wider">Worker Limit</div>
-              <div className="text-base font-bold text-white">
-                {isEnterpriseTier ? 'Unlimited' : profile?.maxWorkers || 10} Slots
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-950/50 border border-slate-800 rounded-xl">
-              <div className="text-slate-400 mb-1 font-semibold uppercase tracking-wider">Public GC Passport Link</div>
-              <div className="text-base font-bold text-white flex items-center space-x-1">
-                {isStandardTier ? (
-                  <span className="text-amber-400 flex items-center space-x-1">
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Locked</span>
-                  </span>
-                ) : (
-                  <span className="text-emerald-400">Unlocked</span>
-                )}
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-950/50 border border-slate-800 rounded-xl">
-              <div className="text-slate-400 mb-1 font-semibold uppercase tracking-wider">Custom Branding & Foremen</div>
-              <div className="text-base font-bold text-white flex items-center space-x-1">
-                {!isEnterpriseTier ? (
-                  <span className="text-slate-500 flex items-center space-x-1">
-                    <Lock className="w-3.5 h-3.5" />
-                    <span>Enterprise Only</span>
-                  </span>
-                ) : (
-                  <span className="text-sky-400">Active</span>
-                )}
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* Company Profile Settings Form */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
           <h3 className="text-lg font-bold text-white mb-4 flex items-center space-x-2">
             <Building className="w-5 h-5 text-blue-400" />
