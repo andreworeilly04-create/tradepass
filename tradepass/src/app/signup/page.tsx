@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { Check, ArrowLeft, CheckCircle2 } from 'lucide-react';
 
@@ -177,6 +177,7 @@ function SignupFormContent() {
         uid = userCredential.user.uid;
       }
 
+      // Backend API route (/api/create-subscription) handles Stripe setup AND secure Firestore database updates
       const res = await fetch('/api/create-subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -192,24 +193,11 @@ function SignupFormContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
-      // Only throw an error if this is a brand-new signup missing a payment session
       if (!data.clientSecret && !isLoggedInUser) {
         throw new Error('Stripe did not return a payment session. Please try again.');
       }
 
-      const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
-      const tierNameObj = TIERS.find(t => t.id === selectedPriceId)?.name || 'Standard Crew';
-
-      await setDoc(doc(db, 'users', uid), {
-        companyName,
-        email,
-        planTier: tierNameObj,
-        maxWorkers: maxWorkersLimit,
-        subscriptionId: data.subscriptionId,
-        createdAt: serverTimestamp(),
-      }, { merge: true });
-
-      // If no payment session is required (e.g., downgrade or lateral change), redirect straight to dashboard
+      // If no payment session is required (e.g., downgrade or lateral tier change), backend handles sync and we redirect straight to dashboard
       if (!data.clientSecret) {
         router.push('/dashboard');
         return;
