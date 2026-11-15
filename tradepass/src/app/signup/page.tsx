@@ -65,8 +65,6 @@ function CheckoutForm({ clientSecret, tierName, onBack }: { clientSecret: string
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  console.log("Active Payment Session Client Secret Present:", Boolean(clientSecret));
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!stripe || !elements) return;
@@ -194,15 +192,14 @@ function SignupFormContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
-      if (!data.clientSecret) {
-        throw new Error('Stripe did not return a payment session. Please use a fresh test email.');
+      // Only throw an error if this is a brand-new signup missing a payment session
+      if (!data.clientSecret && !isLoggedInUser) {
+        throw new Error('Stripe did not return a payment session. Please try again.');
       }
 
       const maxWorkersLimit = selectedPriceId === TIERS[0].id ? 10 : selectedPriceId === TIERS[1].id ? 25 : 999;
       const tierNameObj = TIERS.find(t => t.id === selectedPriceId)?.name || 'Standard Crew';
 
-      // FIX: Removed eager 'subscriptionStatus: free' overwrite so backing out doesn't lock out the user.
-      // Stripe webhooks will handle setting status to active/paid once payment succeeds.
       await setDoc(doc(db, 'users', uid), {
         companyName,
         email,
@@ -211,6 +208,12 @@ function SignupFormContent() {
         subscriptionId: data.subscriptionId,
         createdAt: serverTimestamp(),
       }, { merge: true });
+
+      // If no payment session is required (e.g., downgrade or lateral change), redirect straight to dashboard
+      if (!data.clientSecret) {
+        router.push('/dashboard');
+        return;
+      }
 
       setClientSecret(data.clientSecret);
 
@@ -241,7 +244,7 @@ function SignupFormContent() {
                 {isLoggedInUser ? 'Change Subscription Tier' : 'Secure Your Job-Site'}
               </h1>
               <p className="text-sm text-slate-400">
-                {isLoggedInUser ? 'Select your new plan tier below. Card re-verification is required if needed.' : 'Choose your crew tier and create your TradePass account.'}
+                {isLoggedInUser ? 'Select your new plan tier below. Card re-verification is only required if a balance is due.' : 'Choose your crew tier and create your TradePass account.'}
               </p>
             </div>
 
@@ -322,7 +325,7 @@ function SignupFormContent() {
                 disabled={loading}
                 className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition disabled:opacity-50 mt-4 shadow-lg shadow-blue-900/20"
               >
-                {loading ? 'Processing...' : isLoggedInUser ? 'Proceed to Payment Verification' : 'Continue to Payment'}
+                {loading ? 'Processing...' : isLoggedInUser ? 'Update Subscription Tier' : 'Continue to Payment'}
               </button>
             </form>
           </>

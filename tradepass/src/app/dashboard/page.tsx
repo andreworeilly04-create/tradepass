@@ -43,6 +43,7 @@ interface UserProfile {
   planTier?: string;
   maxWorkers?: number;
   subscriptionStatus?: string;
+  cancelAtPeriodEnd?: boolean;
   companyLogoUrl?: string;
   brandColor?: string;
   foremanEmails?: string[];
@@ -187,9 +188,10 @@ export default function DashboardPage() {
   const isAtCapacity = !isEnterpriseTier && totalActive >= maxWorkers;
   const brandColor = profile?.brandColor || '#0ea5e9';
 
-  // STRICT ACCESS GATE: Only 'active' status grants full access
+  // ACCESS GATE: Grant full access if active OR if cancelAtPeriodEnd is true (prepaid period remaining)
   const subscriptionStatus = profile?.subscriptionStatus || 'free';
-  const isSubscriptionActive = subscriptionStatus === 'active';
+  const cancelAtPeriodEnd = profile?.cancelAtPeriodEnd || false;
+  const isSubscriptionActive = subscriptionStatus === 'active' || cancelAtPeriodEnd === true;
 
   const handleSharePassport = async () => {
     if (!user?.uid) return;
