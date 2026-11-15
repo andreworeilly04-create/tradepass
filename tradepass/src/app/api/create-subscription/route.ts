@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { db } from '@/lib/firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { adminDb } from '@/lib/firebaseAdmin';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16' as any,
@@ -77,13 +76,15 @@ export async function POST(req: Request) {
             clientSecret = (newSubscription.pending_setup_intent as any).client_secret;
           }
 
-          await updateDoc(doc(db, 'users', uid), {
+          // Use Firebase Admin SDK to update document securely
+          await adminDb.collection('users').doc(uid).set({
             planTier: tierNameObj,
             maxWorkers: maxWorkersLimit,
             subscriptionId: newSubscription.id,
             cancelAtPeriodEnd: false,
             subscriptionStatus: 'active',
-          });
+            updatedAt: new Date(),
+          }, { merge: true });
 
           return NextResponse.json({
             success: true,
@@ -112,13 +113,15 @@ export async function POST(req: Request) {
           }
         }
 
-        await updateDoc(doc(db, 'users', uid), {
+        // Use Firebase Admin SDK to update document securely
+        await adminDb.collection('users').doc(uid).set({
           planTier: tierNameObj,
           maxWorkers: maxWorkersLimit,
           subscriptionId: updatedSubscription.id,
           cancelAtPeriodEnd: false,
           subscriptionStatus: 'active',
-        });
+          updatedAt: new Date(),
+        }, { merge: true });
 
         return NextResponse.json({
           success: true,
@@ -160,6 +163,18 @@ export async function POST(req: Request) {
       const si = subscription.pending_setup_intent as any;
       clientSecret = si.client_secret;
     }
+
+    // Use Firebase Admin SDK for brand new user profile creation/merge
+    await adminDb.collection('users').doc(uid).set({
+      companyName,
+      email,
+      planTier: tierNameObj,
+      maxWorkers: maxWorkersLimit,
+      subscriptionId: subscription.id,
+      cancelAtPeriodEnd: false,
+      subscriptionStatus: 'active',
+      createdAt: new Date(),
+    }, { merge: true });
 
     return NextResponse.json({
       success: true,
