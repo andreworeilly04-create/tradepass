@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { adminDb } from '@/lib/firebaseAdmin';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16' as any,
@@ -23,21 +22,20 @@ export async function POST(req: Request) {
       cancel_at_period_end: false,
     });
 
-    // Synchronize cancellation reversal immediately in Firestore
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('subscriptionId', '==', subscriptionId));
-    const querySnapshot = await getDocs(q);
+    // Use Firebase Admin SDK to find and update user records securely
+    const usersRef = adminDb.collection('users');
+    const snapshot = await usersRef.where('subscriptionId', '==', subscriptionId).get();
 
-    if (!querySnapshot.empty) {
-      // Use Promise.all to properly await Firestore document updates
-      const updatePromises = querySnapshot.docs.map((userDoc) =>
-        updateDoc(doc(db, 'users', userDoc.id), {
+    if (!snapshot.empty) {
+      const batch = adminDb.batch();
+      snapshot.docs.forEach((userDoc) => {
+        batch.update(userDoc.ref, {
           cancelAtPeriodEnd: subscription.cancel_at_period_end, // Will be false
+          subscriptionStatus: 'active',
           updatedAt: new Date(),
-        })
-      );
-
-      await Promise.all(updatePromises);
+        });
+      });
+      await batch.commit();
     }
 
     return NextResponse.json({
