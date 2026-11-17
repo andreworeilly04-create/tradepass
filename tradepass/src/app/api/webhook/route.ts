@@ -19,6 +19,20 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16' as any,
 });
 
+// Helper to resolve priceId to tier name & worker limits
+function getTierDetails(priceId: string) {
+  if (priceId === process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID) {
+    return { planTier: 'Standard Crew', maxWorkers: 10 };
+  }
+  if (priceId === process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID) {
+    return { planTier: 'Crew Pro', maxWorkers: 25 };
+  }
+  if (priceId === process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID) {
+    return { planTier: 'Multi-Crew Enterprise', maxWorkers: 999 };
+  }
+  return null;
+}
+
 export async function POST(req: Request) {
   const signature = req.headers.get('stripe-signature');
 
@@ -53,18 +67,33 @@ export async function POST(req: Request) {
 
         if (!subscriptionId) break;
 
+        // Retrieve subscription to get the latest active price ID
+        const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+        const priceId = subscription.items.data[0]?.price.id;
+        const tierInfo = priceId ? getTierDetails(priceId) : null;
+
         const usersSnapshot = await db.collection('users').where('subscriptionId', '==', subscriptionId).get();
 
         if (!usersSnapshot.empty) {
           const batch = db.batch();
           usersSnapshot.docs.forEach((userDoc) => {
-            batch.update(userDoc.ref, {
+            const updateData: any = {
               subscriptionStatus: 'active',
+              subscriptionId: subscription.id,
+              cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
               updatedAt: FieldValue.serverTimestamp(),
-            });
+            };
+
+            // If a valid tier was found from the paid invoice price, sync it!
+            if (tierInfo) {
+              updateData.planTier = tierInfo.planTier;
+              updateData.maxWorkers = tierInfo.maxWorkers;
+            }
+
+            batch.update(userDoc.ref, updateData);
           });
           await batch.commit();
-          console.log(`Successfully activated subscription for sub ID: ${subscriptionId}`);
+          console.log(`Successfully activated & synchronized subscription for sub ID: ${subscriptionId}`);
         }
         break;
       }
@@ -82,19 +111,30 @@ export async function POST(req: Request) {
           break;
         }
 
+        const priceId = subscription.items.data[0]?.price.id;
+        const tierInfo = priceId ? getTierDetails(priceId) : null;
+
         const usersSnapshot = await db.collection('users').where('subscriptionId', '==', subscriptionId).get();
 
         if (!usersSnapshot.empty) {
           const batch = db.batch();
           usersSnapshot.docs.forEach((userDoc) => {
-            batch.update(userDoc.ref, {
+            const updateData: any = {
               subscriptionStatus: status,
               cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
               updatedAt: FieldValue.serverTimestamp(),
-            });
+            };
+
+            // Dynamically update tier & limits if price changed (e.g. instant downgrade or confirmed upgrade)
+            if (tierInfo) {
+              updateData.planTier = tierInfo.planTier;
+              updateData.maxWorkers = tierInfo.maxWorkers;
+            }
+
+            batch.update(userDoc.ref, updateData);
           });
           await batch.commit();
-          console.log(`Updated subscription ${subscriptionId} status to: ${status}`);
+          console.log(`Updated subscription ${subscriptionId} status to: ${status} with tier info.`);
         }
         break;
       }
