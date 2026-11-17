@@ -103,22 +103,40 @@ export async function POST(req: Request) {
           });
         }
 
-        // Standard update for active subscriptions - force payment confirmation & checkout
+        // Standard update: Check if it's an upgrade or a downgrade based on price ranks
+        const currentPriceId = subscription.items.data[0].price.id;
+        
+        const priceRanks: Record<string, number> = {
+          [process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID!]: 1,
+          [process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID!]: 2,
+          [process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID!]: 3,
+        };
+
+        const oldRank = priceRanks[currentPriceId] || 0;
+        const newRank = priceRanks[priceId] || 0;
+        const isUpgrade = newRank > oldRank;
+
         const subscriptionItemId = subscription.items.data[0].id;
 
-        const updatedSubscription = await stripe.subscriptions.update(activeSubId, {
+        const updateParams: Stripe.SubscriptionUpdateParams = {
           items: [{ id: subscriptionItemId, price: priceId }],
           proration_behavior: 'create_prorations',
-          payment_behavior: 'default_incomplete', // Forces a payment intent to be generated for plan changes
           cancel_at_period_end: false,
           metadata: { firebaseUID: uid },
-          expand: ['latest_invoice.payment_intent'],
-        });
+        };
+
+        // Force payment checkout only if it's an upgrade
+        if (isUpgrade) {
+          updateParams.payment_behavior = 'default_incomplete';
+          updateParams.expand = ['latest_invoice.payment_intent'];
+        }
+
+        const updatedSubscription = await stripe.subscriptions.update(activeSubId, updateParams);
 
         let clientSecret: string | null = null;
         const latestInvoice = updatedSubscription.latest_invoice as any;
 
-        if (latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
+        if (isUpgrade && latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
           const pi = latestInvoice.payment_intent as any;
           clientSecret = pi.client_secret;
         }
@@ -138,7 +156,7 @@ export async function POST(req: Request) {
         return NextResponse.json({
           success: true,
           subscriptionId: updatedSubscription.id,
-          clientSecret, // Will now reliably return clientSecret to trigger checkout
+          clientSecret, // String for upgrades (triggers checkout), null for downgrades (skips to dashboard)
         });
       }
     }
