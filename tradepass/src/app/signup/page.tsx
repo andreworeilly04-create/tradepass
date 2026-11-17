@@ -193,17 +193,14 @@ function SignupFormContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
-      if (!data.clientSecret && !isLoggedInUser) {
-        throw new Error('Stripe did not return a payment session. Please try again.');
-      }
-
-      // If no payment session is required (e.g., downgrade or lateral tier change), backend handles sync and we redirect straight to dashboard
-      if (!data.clientSecret) {
-        router.push('/dashboard');
+      // If backend returned a payment clientSecret, open the Stripe Elements checkout form
+      if (data.clientSecret) {
+        setClientSecret(data.clientSecret);
         return;
       }
 
-      setClientSecret(data.clientSecret);
+      // Otherwise (e.g. instant downgrade), sync is complete so redirect straight to dashboard
+      router.push('/dashboard');
 
     } catch (err: any) {
       setError(err.message);
