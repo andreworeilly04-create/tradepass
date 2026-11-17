@@ -103,12 +103,13 @@ export async function POST(req: Request) {
           });
         }
 
-        // Standard update for genuinely active/trialing subscriptions (upgrades/downgrades)
+        // Standard update for active subscriptions - force payment confirmation & checkout
         const subscriptionItemId = subscription.items.data[0].id;
 
         const updatedSubscription = await stripe.subscriptions.update(activeSubId, {
           items: [{ id: subscriptionItemId, price: priceId }],
           proration_behavior: 'create_prorations',
+          payment_behavior: 'default_incomplete', // Forces a payment intent to be generated for plan changes
           cancel_at_period_end: false,
           metadata: { firebaseUID: uid },
           expand: ['latest_invoice.payment_intent'],
@@ -119,9 +120,7 @@ export async function POST(req: Request) {
 
         if (latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
           const pi = latestInvoice.payment_intent as any;
-          if (pi.status === 'requires_action' || pi.status === 'requires_payment_method') {
-            clientSecret = pi.client_secret;
-          }
+          clientSecret = pi.client_secret;
         }
 
         await adminDb.collection('users').doc(uid).set(
@@ -139,7 +138,7 @@ export async function POST(req: Request) {
         return NextResponse.json({
           success: true,
           subscriptionId: updatedSubscription.id,
-          clientSecret,
+          clientSecret, // Will now reliably return clientSecret to trigger checkout
         });
       }
     }
