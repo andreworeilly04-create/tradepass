@@ -88,13 +88,10 @@ export async function POST(req: Request) {
             clientSecret = (newSubscription.pending_setup_intent as any).client_secret;
           }
 
-          // KEEP STATUS 'incomplete' UNTIL PAYMENT SUCCEEDS VIA WEBHOOK
+          // Keep subscriptionId updated for abandoned retries, but don't force planTier change yet
           await adminDb.collection('users').doc(uid).set(
             {
-              planTier: tierNameObj,
-              maxWorkers: maxWorkersLimit,
               subscriptionId: newSubscription.id,
-              cancelAtPeriodEnd: false,
               subscriptionStatus: 'incomplete',
               updatedAt: new Date(),
             },
@@ -178,12 +175,10 @@ export async function POST(req: Request) {
           clientSecret = pi.client_secret;
         }
 
+        // DO NOT write planTier/maxWorkers here yet. Let the webhook handle it upon successful payment.
         await adminDb.collection('users').doc(uid).set(
           {
-            planTier: tierNameObj,
-            maxWorkers: maxWorkersLimit,
             subscriptionId: updatedSubscription.id,
-            cancelAtPeriodEnd: false,
             subscriptionStatus: updatedSubscription.status,
             updatedAt: new Date(),
           },
@@ -236,7 +231,7 @@ export async function POST(req: Request) {
       clientSecret = si.client_secret;
     }
 
-    // Store as 'incomplete' so dashboard access remains locked until webhook confirms payment
+    // Brand new signups can safely record initial tier info since they have no prior active tier
     await adminDb.collection('users').doc(uid).set(
       {
         companyName,
