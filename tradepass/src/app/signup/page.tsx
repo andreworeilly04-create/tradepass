@@ -177,7 +177,7 @@ function SignupFormContent() {
         uid = userCredential.user.uid;
       }
 
-      // Backend API route (/api/create-subscription) handles Stripe setup AND secure Firestore database updates
+      // Backend API route handles Stripe setup AND secure Firestore database updates
       const res = await fetch('/api/create-subscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -322,7 +322,10 @@ function SignupFormContent() {
             <CheckoutForm 
               clientSecret={clientSecret} 
               tierName={selectedTierObj?.name || 'Subscription'} 
-              onBack={() => setClientSecret('')} 
+              onBack={() => {
+                setClientSecret('');
+                setError('');
+              }} 
             />
           </Elements>
         )}
