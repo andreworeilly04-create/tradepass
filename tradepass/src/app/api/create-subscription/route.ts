@@ -125,9 +125,12 @@ export async function POST(req: Request) {
           metadata: { firebaseUID: uid },
         };
 
-        // Force payment checkout only if it's an upgrade
+        // Force payment checkout and mandatory new card entry if it's an upgrade
         if (isUpgrade) {
           updateParams.payment_behavior = 'default_incomplete';
+          updateParams.payment_settings = {
+            save_default_payment_method: 'on_subscription',
+          };
           updateParams.expand = ['latest_invoice.payment_intent'];
         }
 
@@ -156,7 +159,7 @@ export async function POST(req: Request) {
         return NextResponse.json({
           success: true,
           subscriptionId: updatedSubscription.id,
-          clientSecret, // String for upgrades (triggers checkout), null for downgrades (skips to dashboard)
+          clientSecret,
         });
       }
     }
