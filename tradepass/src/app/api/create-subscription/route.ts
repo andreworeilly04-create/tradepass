@@ -103,7 +103,7 @@ export async function POST(req: Request) {
           });
         }
 
-        // Standard update: Check if it's an upgrade or a downgrade based on price ranks
+        // Standard update: Check if it's an upgrade, downgrade, or same tier based on price ranks
         const currentPriceId = subscription.items.data[0].price.id;
         
         const priceRanks: Record<string, number> = {
@@ -115,6 +115,10 @@ export async function POST(req: Request) {
         const oldRank = priceRanks[currentPriceId] || 0;
         const newRank = priceRanks[priceId] || 0;
         const isUpgrade = newRank > oldRank;
+        const isSameTier = newRank === oldRank;
+
+        // Force checkout if upgrading OR if re-selecting same tier while status is incomplete
+        const forcesCheckout = isUpgrade || (isSameTier && subscription.status === 'incomplete');
 
         const subscriptionItemId = subscription.items.data[0].id;
 
@@ -125,8 +129,7 @@ export async function POST(req: Request) {
           metadata: { firebaseUID: uid },
         };
 
-        // Force payment checkout and mandatory new card entry if it's an upgrade
-        if (isUpgrade) {
+        if (forcesCheckout) {
           updateParams.payment_behavior = 'default_incomplete';
           updateParams.payment_settings = {
             save_default_payment_method: 'on_subscription',
@@ -139,7 +142,7 @@ export async function POST(req: Request) {
         let clientSecret: string | null = null;
         const latestInvoice = updatedSubscription.latest_invoice as any;
 
-        if (isUpgrade && latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
+        if (forcesCheckout && latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
           const pi = latestInvoice.payment_intent as any;
           clientSecret = pi.client_secret;
         }
