@@ -65,6 +65,11 @@ export async function POST(req: Request) {
           await stripe.subscriptions.cancel(activeSubId);
           console.log(`Canceled abandoned incomplete subscription: ${activeSubId}`);
 
+          // Clear customer default payment method to force manual card entry
+          await stripe.customers.update(customer.id, {
+            invoice_settings: { default_payment_method: null as any },
+          });
+
           const newSubscription = await stripe.subscriptions.create({
             customer: customer.id,
             items: [{ price: priceId }],
@@ -74,7 +79,7 @@ export async function POST(req: Request) {
             expand: ['latest_invoice.payment_intent', 'pending_setup_intent'],
           });
 
-          let clientSecret: string | null = null;
+          let clientSecret: string | undefined = undefined;
           const latestInv = newSubscription.latest_invoice as any;
           if (latestInv && typeof latestInv === 'object' && latestInv.payment_intent) {
             clientSecret = (latestInv.payment_intent as any).client_secret;
@@ -114,35 +119,61 @@ export async function POST(req: Request) {
 
         const oldRank = priceRanks[currentPriceId] || 0;
         const newRank = priceRanks[priceId] || 0;
-        const isUpgrade = newRank > oldRank;
-        const isSameTier = newRank === oldRank;
-
-        // Force checkout if upgrading OR if re-selecting same tier while status is incomplete
-        const forcesCheckout = isUpgrade || (isSameTier && subscription.status === 'incomplete');
+        const isDowngrade = newRank < oldRank;
 
         const subscriptionItemId = subscription.items.data[0].id;
+
+        // DOWNGRADE: Update instantly, no payment collection needed, redirect to dashboard
+        if (isDowngrade) {
+          const updatedSubscription = await stripe.subscriptions.update(activeSubId, {
+            items: [{ id: subscriptionItemId, price: priceId }],
+            proration_behavior: 'create_prorations',
+            cancel_at_period_end: false,
+            metadata: { firebaseUID: uid },
+          });
+
+          await adminDb.collection('users').doc(uid).set(
+            {
+              planTier: tierNameObj,
+              maxWorkers: maxWorkersLimit,
+              subscriptionId: updatedSubscription.id,
+              cancelAtPeriodEnd: false,
+              subscriptionStatus: updatedSubscription.status,
+              updatedAt: new Date(),
+            },
+            { merge: true }
+          );
+
+          return NextResponse.json({
+            success: true,
+            subscriptionId: updatedSubscription.id,
+            clientSecret: undefined,
+          });
+        }
+
+        // UPGRADE or SAME TIER: Force checkout and mandatory new card entry
+        await stripe.customers.update(customer.id, {
+          invoice_settings: { default_payment_method: null as any },
+        });
 
         const updateParams: Stripe.SubscriptionUpdateParams = {
           items: [{ id: subscriptionItemId, price: priceId }],
           proration_behavior: 'create_prorations',
           cancel_at_period_end: false,
           metadata: { firebaseUID: uid },
-        };
-
-        if (forcesCheckout) {
-          updateParams.payment_behavior = 'default_incomplete';
-          updateParams.payment_settings = {
+          payment_behavior: 'default_incomplete',
+          payment_settings: {
             save_default_payment_method: 'on_subscription',
-          };
-          updateParams.expand = ['latest_invoice.payment_intent'];
-        }
+          },
+          expand: ['latest_invoice.payment_intent'],
+        };
 
         const updatedSubscription = await stripe.subscriptions.update(activeSubId, updateParams);
 
-        let clientSecret: string | null = null;
+        let clientSecret: string | undefined = undefined;
         const latestInvoice = updatedSubscription.latest_invoice as any;
 
-        if (forcesCheckout && latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
+        if (latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
           const pi = latestInvoice.payment_intent as any;
           clientSecret = pi.client_secret;
         }
@@ -168,6 +199,10 @@ export async function POST(req: Request) {
     }
 
     // SCENARIO B: Brand-new user signing up for the first time
+    await stripe.customers.update(customer.id, {
+      invoice_settings: { default_payment_method: null as any },
+    });
+
     const existingIncomplete = await stripe.subscriptions.list({
       customer: customer.id,
       status: 'incomplete',
@@ -189,7 +224,7 @@ export async function POST(req: Request) {
       expand: ['latest_invoice.payment_intent', 'pending_setup_intent'],
     });
 
-    let clientSecret: string | null = null;
+    let clientSecret: string | undefined = undefined;
     const latestInvoice = subscription.latest_invoice as any;
     if (latestInvoice && typeof latestInvoice === 'object' && latestInvoice.payment_intent) {
       const pi = latestInvoice.payment_intent as any;
