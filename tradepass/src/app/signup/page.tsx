@@ -325,6 +325,9 @@ function SignupFormContent() {
               onBack={() => {
                 setClientSecret('');
                 setError('');
+                if (profile) {
+                  setProfile({ ...profile, subscriptionId: undefined });
+                }
               }} 
             />
           </Elements>
