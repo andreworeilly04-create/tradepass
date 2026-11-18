@@ -55,37 +55,45 @@ export async function POST(req: Request) {
         const priceId = subscription.items.data[0]?.price.id;
         const tierInfo = priceId ? getTierDetails(priceId) : null;
 
+        // Retrieve customer from Stripe to grab stored name or company metadata
+        const customer = customerId ? await stripe.customers.retrieve(customerId) as Stripe.Customer : null;
+        const firebaseUID = customer && !customer.deleted ? customer.metadata?.firebaseUID : null;
+        const stripeCompanyName = customer && !customer.deleted ? customer.name || customer.metadata?.companyName : null;
+
         // Find user by subscriptionId
         let usersSnapshot = await adminDb
           .collection('users')
           .where('subscriptionId', '==', subscriptionId)
           .get();
 
-        if (usersSnapshot.empty && customerId) {
-          // Fallback lookup via Stripe customer metadata
-          const customer = await stripe.customers.retrieve(customerId);
-          if (!customer.deleted && customer.metadata?.firebaseUID) {
-            const userDoc = await adminDb.collection('users').doc(customer.metadata.firebaseUID).get();
-            if (userDoc.exists) {
-              usersSnapshot = { empty: false, docs: [userDoc] } as any;
-            }
+        if (usersSnapshot.empty && firebaseUID) {
+          // Fallback lookup via Stripe customer metadata UID
+          const userDoc = await adminDb.collection('users').doc(firebaseUID).get();
+          if (userDoc.exists) {
+            usersSnapshot = { empty: false, docs: [userDoc] } as any;
           }
         }
 
         if (!usersSnapshot.empty && tierInfo) {
           const batch = adminDb.batch();
           usersSnapshot.docs.forEach((userDoc) => {
+            const existingData = userDoc.data();
+
             batch.update(userDoc.ref, {
               planTier: tierInfo.planTier,
               maxWorkers: tierInfo.maxWorkers,
               subscriptionId: subscriptionId,
               subscriptionStatus: 'active',
+              // Preserves existing company name or safely pulls it from Stripe customer details
+              companyName: existingData?.companyName && existingData.companyName !== 'my company'
+                ? existingData.companyName
+                : stripeCompanyName || existingData?.companyName || 'My Company',
               cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
               updatedAt: FieldValue.serverTimestamp(),
             });
           });
           await batch.commit();
-          console.log(`Successfully upgraded user tier on payment success for subscription: ${subscriptionId}`);
+          console.log(`Successfully upgraded user tier and preserved company name for subscription: ${subscriptionId}`);
         }
         break;
       }
