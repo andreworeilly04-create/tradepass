@@ -9,9 +9,11 @@ import { CreditCard, Lock, Loader2 } from 'lucide-react';
 
 interface CheckoutFormProps {
   uid: string;
+  selectedTier?: string;   // Optional prop if passed from signup parent
+  maxWorkers?: number;     // Optional prop if passed from signup parent
 }
 
-export default function CheckoutForm({ uid }: CheckoutFormProps) {
+export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorkers = 25 }: CheckoutFormProps) {
   const stripe = useStripe();
   const elements = useElements();
   const router = useRouter();
@@ -39,14 +41,22 @@ export default function CheckoutForm({ uid }: CheckoutFormProps) {
       setMessage(error.message || 'An unexpected error occurred during payment.');
       setIsProcessing(false);
     } else if (paymentIntent && paymentIntent.status === 'succeeded') {
-      // Instantly mark user's subscription as active in Firestore
-      await setDoc(doc(db, 'users', uid), {
-        planTier: 'Crew Pro',
-        subscriptionStatus: 'active',
-      }, { merge: true });
+      try {
+        // Instantly mark user's subscription and worker limits active in Firestore
+        await setDoc(doc(db, 'users', uid), {
+          planTier: selectedTier,
+          maxWorkers: maxWorkers,
+          subscriptionStatus: 'active',
+          updatedAt: new Date(),
+        }, { merge: true });
 
-      setMessage('Payment successful! Redirecting to dashboard...');
-      router.push('/dashboard');
+        setMessage('Payment successful! Redirecting to dashboard...');
+        router.push('/dashboard');
+      } catch (dbErr: any) {
+        console.error('Firestore update error:', dbErr);
+        setMessage('Payment succeeded, but database sync failed. Please contact support.');
+        setIsProcessing(false);
+      }
     } else {
       setIsProcessing(false);
     }
@@ -60,7 +70,7 @@ export default function CheckoutForm({ uid }: CheckoutFormProps) {
         </div>
         <div>
           <h2 className="text-lg font-extrabold text-white">Payment Details</h2>
-          <p className="text-xs text-slate-400">Enter your card details to activate Crew Pro</p>
+          <p className="text-xs text-slate-400">Enter your card details to activate {selectedTier}</p>
         </div>
       </div>
 
