@@ -15,8 +15,9 @@ if (!getApps().length) {
 
 const db = getFirestore();
 
+// Updated to match your Stripe Dashboard webhook endpoint version
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2023-10-16' as any,
+  apiVersion: '2026-10-28.endive' as any,
 });
 
 // Helper to resolve priceId to tier name & worker limits
