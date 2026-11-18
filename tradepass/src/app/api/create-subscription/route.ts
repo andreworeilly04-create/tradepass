@@ -356,39 +356,37 @@ export async function POST(req: Request) {
         // ==========================================
 
         const updatedSubscription =
-            const updatedSubscription =
-      await stripe.subscriptions.update(
-        subscription.id,
-        {
-          items: [
+          await stripe.subscriptions.update(
+            subscription.id,
             {
-              id: currentItem.id,
-              price: priceId,
-            },
-          ],
+              items: [
+                {
+                  id: currentItem.id,
+                  price: priceId,
+                },
+              ],
 
-          // FIX 1: Change to 'always_invoice' so Stripe immediately generates the invoice due now
-          proration_behavior: 'always_invoice',
-          cancel_at_period_end: false,
+              // Force immediate invoice generation and proration calculation
+              proration_behavior: 'always_invoice',
+              cancel_at_period_end: false,
 
-          // Force invoice creation and interactive payment intent
-          payment_behavior: 'default_incomplete',
+              // Force invoice creation and interactive payment intent
+              payment_behavior: 'default_incomplete',
 
-          // FIX 2: Ensure old default payment method is cleared so it doesn't auto-charge
-          default_payment_method: '',
+              // Clear old default payment method so it doesn't auto-charge in the background
+              default_payment_method: '',
 
-          // FIX 3: Prevent saving the new card to the customer's profile
-          payment_settings: {
-            save_default_payment_method: 'off',
-          },
+              // Prevent saving the new card to the customer's profile
+              payment_settings: {
+                save_default_payment_method: 'off',
+              },
 
-          expand: [
-            'latest_invoice.payment_intent',
-            'pending_setup_intent',
-          ],
-        }
-      );
-
+              expand: [
+                'latest_invoice.payment_intent',
+                'pending_setup_intent',
+              ],
+            }
+          );
 
         const intent = await getSubscriptionClientSecret(
           updatedSubscription
@@ -471,8 +469,6 @@ export async function POST(req: Request) {
     // SCENARIO B: BRAND-NEW SUBSCRIPTION
     // ==========================================
 
-    // Cancel any remaining incomplete subscriptions belonging
-    // to this customer before creating a replacement.
     const existingIncomplete =
       await stripe.subscriptions.list({
         customer: customer.id,
@@ -484,7 +480,6 @@ export async function POST(req: Request) {
       await stripe.subscriptions.cancel(oldSubscription.id);
     }
 
-    // Create the new subscription.
     const subscription = await stripe.subscriptions.create({
       customer: customer.id,
 
@@ -515,8 +510,6 @@ export async function POST(req: Request) {
       subscription
     );
 
-    // Save tracking information only.
-    // Do not activate the paid tier before payment succeeds.
     await adminDb.collection('users').doc(uid).set(
       {
         companyName,
@@ -538,7 +531,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // Handle subscriptions that do not require a payment intent.
     if (
       subscription.status === 'active' ||
       subscription.status === 'trialing'
@@ -579,3 +571,4 @@ export async function POST(req: Request) {
     );
   }
 }
+  
