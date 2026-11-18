@@ -1,4 +1,5 @@
 
+
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { adminDb } from '@/lib/firebaseAdmin';
@@ -7,35 +8,46 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16' as any,
 });
 
-// Retrieve the correct client secret from Stripe.
-async function getSubscriptionClientSecret(subscription: Stripe.Subscription) {
-  let paymentIntent: any = null;
-  let setupIntent: any = subscription.pending_setup_intent;
-
-  const latestInvoice: any = subscription.latest_invoice;
-
-  if (latestInvoice) {
-    let invoice: any = latestInvoice;
-
-    if (typeof latestInvoice === 'string') {
-      invoice = await stripe.invoices.retrieve(latestInvoice, {
-        expand: ['payment_intent'],
-      });
-    }
-
-    paymentIntent = invoice?.payment_intent;
-
-    if (typeof paymentIntent === 'string') {
-      paymentIntent = await stripe.paymentIntents.retrieve(paymentIntent);
-    }
-
-    if (paymentIntent?.client_secret) {
-      return {
-        clientSecret: paymentIntent.client_secret,
-        intentType: 'payment',
-      };
-    }
+function getTierDetails(priceId: string) {
+  if (priceId === process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID) {
+    return { rank: 1, planTier: 'Standard Crew', maxWorkers: 10 };
   }
+
+  if (priceId === process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID) {
+    return { rank: 2, planTier: 'Crew Pro', maxWorkers: 25 };
+  }
+
+  if (priceId === process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID) {
+    return { rank: 3, planTier: 'Multi-Crew Enterprise', maxWorkers: 999 };
+  }
+
+  return null;
+}
+
+async function getSubscriptionIntent(subscription: Stripe.Subscription) {
+  let invoice: any = subscription.latest_invoice;
+  let paymentIntent: any = null;
+
+  if (typeof invoice === 'string') {
+    invoice = await stripe.invoices.retrieve(invoice, {
+      expand: ['payment_intent'],
+    });
+  }
+
+  paymentIntent = invoice?.payment_intent;
+
+  if (typeof paymentIntent === 'string') {
+    paymentIntent = await stripe.paymentIntents.retrieve(paymentIntent);
+  }
+
+  if (paymentIntent?.client_secret) {
+    return {
+      clientSecret: paymentIntent.client_secret,
+      intentType: 'payment',
+    };
+  }
+
+  let setupIntent: any = subscription.pending_setup_intent;
 
   if (typeof setupIntent === 'string') {
     setupIntent = await stripe.setupIntents.retrieve(setupIntent);
@@ -52,6 +64,24 @@ async function getSubscriptionClientSecret(subscription: Stripe.Subscription) {
     clientSecret: null,
     intentType: null,
   };
+}
+
+async function saveSubscriptionTier(
+  uid: string,
+  subscription: Stripe.Subscription,
+  tier: { planTier: string; maxWorkers: number }
+) {
+  await adminDb.collection('users').doc(uid).set(
+    {
+      planTier: tier.planTier,
+      maxWorkers: tier.maxWorkers,
+      subscriptionId: subscription.id,
+      subscriptionStatus: subscription.status,
+      cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
+      updatedAt: new Date(),
+    },
+    { merge: true }
+  );
 }
 
 export async function POST(req: Request) {
@@ -71,48 +101,28 @@ export async function POST(req: Request) {
       );
     }
 
-    // Validate the selected Stripe price.
-    const priceRanks: Record<string, number> = {};
+    const newTier = getTierDetails(priceId);
 
-    if (process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID) {
-      priceRanks[process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID] = 1;
-    }
-
-    if (process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID) {
-      priceRanks[process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID] = 2;
-    }
-
-    if (process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID) {
-      priceRanks[process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID] = 3;
-    }
-
-    const newRank = priceRanks[priceId];
-
-    if (!newRank) {
+    if (!newTier) {
       return NextResponse.json(
         { error: 'Invalid subscription price selected.' },
         { status: 400 }
       );
     }
 
-    let tierNameObj = 'Crew Pro';
-
-    if (newRank === 1) {
-      tierNameObj = 'Standard Crew';
-    } else if (newRank === 3) {
-      tierNameObj = 'Multi-Crew Enterprise';
-    }
-
-    const maxWorkersLimit =
-      newRank === 1 ? 10 : newRank === 2 ? 25 : 999;
-
-    // Find or create Stripe customer.
+    // Find or create the Stripe customer.
     const customers = await stripe.customers.list({
       email,
-      limit: 1,
+      limit: 10,
     });
 
-    let customer = customers.data[0];
+    let customer = customers.data.find(
+      (item) => item.metadata?.firebaseUID === uid
+    );
+
+    if (!customer) {
+      customer = customers.data[0];
+    }
 
     if (!customer) {
       customer = await stripe.customers.create({
@@ -124,7 +134,8 @@ export async function POST(req: Request) {
         },
       });
     } else {
-      await stripe.customers.update(customer.id, {
+      customer = await stripe.customers.update(customer.id, {
+        email,
         name: companyName,
         metadata: {
           firebaseUID: uid,
@@ -133,20 +144,22 @@ export async function POST(req: Request) {
       });
     }
 
-    let activeSubId = subscriptionId;
+    let activeSubId: string | null = subscriptionId || null;
 
-    // Find an existing subscription if no ID was provided.
+    // Find an existing subscription if the user profile has no ID.
     if (!activeSubId) {
       const existingSubs = await stripe.subscriptions.list({
         customer: customer.id,
         status: 'all',
-        limit: 10,
+        limit: 20,
       });
 
       const existingSubscription = existingSubs.data.find(
         (sub) =>
-          sub.status !== 'canceled' &&
-          sub.status !== 'incomplete_expired'
+          sub.status === 'active' ||
+          sub.status === 'trialing' ||
+          sub.status === 'past_due' ||
+          sub.status === 'incomplete'
       );
 
       if (existingSubscription) {
@@ -155,7 +168,7 @@ export async function POST(req: Request) {
     }
 
     // ==========================================
-    // SCENARIO A: EXISTING SUBSCRIPTION
+    // EXISTING SUBSCRIPTION
     // ==========================================
 
     if (activeSubId) {
@@ -181,9 +194,14 @@ export async function POST(req: Request) {
         );
       }
 
-      if (
-        subscription.status !== 'canceled' &&
-        subscription.status !== 'incomplete_expired'
+      // An incomplete subscription cannot safely be upgraded.
+      // Cancel it and create a fresh subscription below.
+      if (subscription.status === 'incomplete') {
+        await stripe.subscriptions.cancel(subscription.id);
+        activeSubId = null;
+      } else if (
+        subscription.status === 'active' ||
+        subscription.status === 'trialing'
       ) {
         const currentItem = subscription.items.data[0];
 
@@ -194,14 +212,28 @@ export async function POST(req: Request) {
           );
         }
 
-        const oldRank = priceRanks[currentItem.price.id] || 0;
-        const isDowngrade = newRank < oldRank;
+        const currentTier = getTierDetails(currentItem.price.id);
 
-        // DOWNGRADE.
-        if (isDowngrade) {
-          const updatedSubscription = await stripe.subscriptions.update(
-            activeSubId,
-            {
+        if (!currentTier) {
+          return NextResponse.json(
+            { error: 'The current subscription tier could not be identified.' },
+            { status: 400 }
+          );
+        }
+
+        // No change needed if the user selected the current tier.
+        if (currentItem.price.id === priceId) {
+          return NextResponse.json({
+            success: true,
+            isNoChange: true,
+            subscriptionId: subscription.id,
+          });
+        }
+
+        // DOWNGRADE: preserve the existing immediate downgrade behavior.
+        if (newTier.rank < currentTier.rank) {
+          const updatedSubscription =
+            await stripe.subscriptions.update(subscription.id, {
               items: [
                 {
                   id: currentItem.id,
@@ -213,19 +245,12 @@ export async function POST(req: Request) {
               metadata: {
                 firebaseUID: uid,
               },
-            }
-          );
+            });
 
-          await adminDb.collection('users').doc(uid).set(
-            {
-              planTier: tierNameObj,
-              maxWorkers: maxWorkersLimit,
-              subscriptionId: updatedSubscription.id,
-              cancelAtPeriodEnd: false,
-              subscriptionStatus: updatedSubscription.status,
-              updatedAt: new Date(),
-            },
-            { merge: true }
+          await saveSubscriptionTier(
+            uid,
+            updatedSubscription,
+            newTier
           );
 
           return NextResponse.json({
@@ -235,23 +260,22 @@ export async function POST(req: Request) {
           });
         }
 
-        // UPGRADE OR SAME TIER.
-        const updatedSubscription = await stripe.subscriptions.update(
-          activeSubId,
-          {
+        // UPGRADE: invoice the prorated amount immediately.
+        // Keep the new price pending until payment succeeds.
+        const updatedSubscription =
+          await stripe.subscriptions.update(subscription.id, {
             items: [
               {
                 id: currentItem.id,
                 price: priceId,
               },
             ],
-            proration_behavior: 'create_prorations',
+            proration_behavior: 'always_invoice',
+            payment_behavior: 'pending_if_incomplete',
             cancel_at_period_end: false,
             metadata: {
               firebaseUID: uid,
             },
-            payment_behavior: 'default_incomplete',
-            collection_method: 'charge_automatically',
             payment_settings: {
               save_default_payment_method: 'on_subscription',
             },
@@ -259,56 +283,92 @@ export async function POST(req: Request) {
               'latest_invoice.payment_intent',
               'pending_setup_intent',
             ],
-          }
-        );
+          });
 
-        const intent = await getSubscriptionClientSecret(
+        const intent = await getSubscriptionIntent(
           updatedSubscription
         );
 
-        if (!intent.clientSecret) {
-          console.error(
-            'Stripe did not return a PaymentIntent or SetupIntent.',
-            updatedSubscription.id
-          );
-
-          return NextResponse.json(
-            {
-              success: false,
-              error:
-                'Stripe did not generate a payment confirmation. Please try again or contact support.',
-              subscriptionId: updatedSubscription.id,
-            },
-            { status: 400 }
-          );
+        if (intent.clientSecret) {
+          return NextResponse.json({
+            success: true,
+            subscriptionId: updatedSubscription.id,
+            clientSecret: intent.clientSecret,
+            intentType: intent.intentType,
+          });
         }
 
-        // Do not activate the new tier before payment confirmation.
-        return NextResponse.json({
-          success: true,
-          subscriptionId: updatedSubscription.id,
-          clientSecret: intent.clientSecret,
-          intentType: intent.intentType,
-        });
+        // Stripe may have completed the change without requiring
+        // another card confirmation.
+        const updatedItem = updatedSubscription.items.data.find(
+          (item) => item.price.id === priceId
+        );
+
+        if (
+          updatedItem &&
+          (updatedSubscription.status === 'active' ||
+            updatedSubscription.status === 'trialing')
+        ) {
+          await saveSubscriptionTier(
+            uid,
+            updatedSubscription,
+            newTier
+          );
+
+          return NextResponse.json({
+            success: true,
+            isNoPaymentRequired: true,
+            subscriptionId: updatedSubscription.id,
+          });
+        }
+
+        return NextResponse.json(
+          {
+            error:
+              'Stripe did not generate a payment confirmation. Please try again or contact support.',
+            subscriptionId: updatedSubscription.id,
+          },
+          { status: 400 }
+        );
+      } else if (subscription.status === 'past_due') {
+        return NextResponse.json(
+          {
+            error:
+              'Your previous subscription payment is past due. Please resolve the outstanding payment before changing tiers.',
+          },
+          { status: 409 }
+        );
+      } else if (
+        subscription.status !== 'canceled' &&
+        subscription.status !== 'incomplete_expired'
+      ) {
+        return NextResponse.json(
+          {
+            error: `Your subscription currently has status "${subscription.status}". Please resolve this subscription before changing tiers.`,
+          },
+          { status: 409 }
+        );
+      } else {
+        activeSubId = null;
       }
     }
 
     // ==========================================
-    // SCENARIO B: BRAND-NEW SUBSCRIPTION
+    // BRAND-NEW SUBSCRIPTION
     // ==========================================
 
-    // Cancel previous incomplete subscriptions.
-    const existingIncomplete = await stripe.subscriptions.list({
-      customer: customer.id,
-      status: 'incomplete',
-      limit: 10,
-    });
+    // Cancel any older incomplete subscriptions for this customer.
+    const incompleteSubscriptions =
+      await stripe.subscriptions.list({
+        customer: customer.id,
+        status: 'incomplete',
+        limit: 20,
+      });
 
-    for (const sub of existingIncomplete.data) {
-      await stripe.subscriptions.cancel(sub.id);
+    for (const oldSubscription of incompleteSubscriptions.data) {
+      await stripe.subscriptions.cancel(oldSubscription.id);
     }
 
-    // Create subscription.
     const subscription = await stripe.subscriptions.create({
       customer: customer.id,
       items: [
@@ -330,27 +390,9 @@ export async function POST(req: Request) {
       ],
     });
 
-    const intent = await getSubscriptionClientSecret(subscription);
+    const intent = await getSubscriptionIntent(subscription);
 
-    if (!intent.clientSecret) {
-      console.error(
-        'Stripe did not return a PaymentIntent or SetupIntent.',
-        subscription.id
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            'Stripe did not generate a payment confirmation. Please try again or contact support.',
-          subscriptionId: subscription.id,
-        },
-        { status: 400 }
-      );
-    }
-
-    // Save subscription tracking information only.
-    // The paid tier is not activated until payment is confirmed.
+    // Save tracking details without granting the paid tier early.
     await adminDb.collection('users').doc(uid).set(
       {
         companyName,
@@ -358,17 +400,41 @@ export async function POST(req: Request) {
         subscriptionId: subscription.id,
         cancelAtPeriodEnd: false,
         subscriptionStatus: subscription.status,
-        createdAt: new Date(),
+        updatedAt: new Date(),
       },
       { merge: true }
     );
 
-    return NextResponse.json({
-      success: true,
-      subscriptionId: subscription.id,
-      clientSecret: intent.clientSecret,
-      intentType: intent.intentType,
-    });
+    if (intent.clientSecret) {
+      return NextResponse.json({
+        success: true,
+        subscriptionId: subscription.id,
+        clientSecret: intent.clientSecret,
+        intentType: intent.intentType,
+      });
+    }
+
+    if (
+      subscription.status === 'active' ||
+      subscription.status === 'trialing'
+    ) {
+      await saveSubscriptionTier(uid, subscription, newTier);
+
+      return NextResponse.json({
+        success: true,
+        isNoPaymentRequired: true,
+        subscriptionId: subscription.id,
+      });
+    }
+
+    return NextResponse.json(
+      {
+        error:
+          'Stripe did not generate a payment confirmation. Please try again or contact support.',
+        subscriptionId: subscription.id,
+      },
+      { status: 400 }
+    );
 
   } catch (err: any) {
     console.error('Subscription API Error:', err);

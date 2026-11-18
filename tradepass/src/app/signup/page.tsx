@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
@@ -11,7 +12,9 @@ import { auth, db } from '@/lib/firebase';
 import { Check, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import CheckoutForm from '@/components/CheckoutForm';
 
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+const stripePromise = loadStripe(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
+);
 
 const TIERS = [
   {
@@ -23,8 +26,8 @@ const TIERS = [
       'Up to 10 Worker Profiles',
       'Automated 30 & 15-Day Email Alerts',
       'Internal Credential & Roster Tracking',
-      'Secure Cloud Document Storage'
-    ]
+      'Secure Cloud Document Storage',
+    ],
   },
   {
     id: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID,
@@ -36,8 +39,8 @@ const TIERS = [
       'Up to 25 Workers',
       'Automated 30, 15, 7, & 1-Day Email Alerts',
       'Itemized Compliance Digest Reports',
-      'Shareable GC Public Passport Link'
-    ]
+      'Shareable GC Public Passport Link',
+    ],
   },
   {
     id: process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID,
@@ -48,8 +51,8 @@ const TIERS = [
       'Unlimited Workers & Staff',
       'Priority 30, 15, 7, & 1-Day Urgent Alerts',
       'Multiple Foreman Accounts',
-      'Custom Company Branding on Passports'
-    ]
+      'Custom Company Branding on Passports',
+    ],
   },
 ];
 
@@ -76,7 +79,7 @@ function SignupFormContent() {
   const [password, setPassword] = useState('');
   const [selectedPriceId, setSelectedPriceId] = useState(getInitialPriceId());
   const [clientSecret, setClientSecret] = useState('');
-  const [userId, setUserId] = useState(''); // <--- Stable UID state variable
+  const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isLoggedInUser, setIsLoggedInUser] = useState(false);
@@ -87,25 +90,34 @@ function SignupFormContent() {
       if (currentUser) {
         setIsLoggedInUser(true);
         setEmail(currentUser.email || '');
-        setUserId(currentUser.uid); // <--- Capture if already logged in
+        setUserId(currentUser.uid);
 
         const userDocRef = doc(db, 'users', currentUser.uid);
         const userSnap = await getDoc(userDocRef);
+
         if (userSnap.exists()) {
           const data = userSnap.data() as UserProfile;
           setProfile(data);
+
           if (data.companyName) {
             setCompanyName(data.companyName);
           }
         }
       }
     });
+
     return () => unsubscribe();
   }, []);
 
   const handleStartCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || (!isLoggedInUser && !password) || !companyName || !selectedPriceId) {
+
+    if (
+      !email ||
+      (!isLoggedInUser && !password) ||
+      !companyName ||
+      !selectedPriceId
+    ) {
       setError('Please fill in all required fields.');
       return;
     }
@@ -117,16 +129,22 @@ function SignupFormContent() {
       let uid = auth.currentUser?.uid;
 
       if (!uid) {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
+
         uid = userCredential.user.uid;
       }
 
-      setUserId(uid); // <--- Lock in the UID state so it's guaranteed never to be empty
+      setUserId(uid);
 
-      // Backend API route handles Stripe setup AND secure Firestore database updates
       const res = await fetch('/api/create-subscription', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           email,
           companyName,
@@ -137,65 +155,103 @@ function SignupFormContent() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to initialize subscription');
 
-      // If backend returned a payment clientSecret, open the Stripe Elements checkout form
+      if (!res.ok) {
+        throw new Error(
+          data.error || 'Failed to initialize subscription.'
+        );
+      }
+
+      // Open Stripe checkout when a valid client secret is returned.
       if (data.clientSecret) {
         setClientSecret(data.clientSecret);
         return;
       }
 
-      // Only route straight to dashboard if it's explicitly marked as a downgrade
-      if (data.isDowngrade) {
+      // No payment required or the selected tier is already active.
+      if (
+        data.isDowngrade ||
+        data.isNoPaymentRequired ||
+        data.isNoChange
+      ) {
         router.push('/dashboard');
-      } else {
-        setError('Payment intent could not be generated. Please check your card or inputs.');
+        return;
       }
 
+      setError(
+        data.error ||
+        'Payment confirmation could not be generated. Please try again.'
+      );
+
     } catch (err: any) {
-      setError(err.message);
+      console.error('Checkout initialization error:', err);
+      setError(err.message || 'Unable to start checkout.');
     } finally {
       setLoading(false);
     }
   };
 
-  const selectedTierObj = TIERS.find(t => t.id === selectedPriceId);
+  const selectedTierObj = TIERS.find(
+    (tier) => tier.id === selectedPriceId
+  );
 
-  // Determine max workers dynamically based on the selected tier name
   const getMaxWorkersForTier = (name?: string) => {
     if (!name) return 10;
+
     if (name.toLowerCase().includes('pro')) return 25;
-    if (name.toLowerCase().includes('enterprise') || name.toLowerCase().includes('multi')) return 999;
+
+    if (
+      name.toLowerCase().includes('enterprise') ||
+      name.toLowerCase().includes('multi')
+    ) {
+      return 999;
+    }
+
     return 10;
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center py-12 px-6">
       <div className="max-w-lg w-full mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
-        
+
         {!clientSecret ? (
           <>
             <div className="mb-6">
-              <Link 
-                href={isLoggedInUser ? "/dashboard" : "/"}
+              <Link
+                href={isLoggedInUser ? '/dashboard' : '/'}
                 className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-400 hover:text-white transition mb-4"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>{isLoggedInUser ? 'Back to Dashboard' : 'Back to Home'}</span>
+                <span>
+                  {isLoggedInUser ? 'Back to Dashboard' : 'Back to Home'}
+                </span>
               </Link>
+
               <h1 className="text-2xl font-extrabold text-white mb-2">
-                {isLoggedInUser ? 'Change Subscription Tier' : 'Secure Your Job-Site'}
+                {isLoggedInUser
+                  ? 'Change Subscription Tier'
+                  : 'Secure Your Job-Site'}
               </h1>
+
               <p className="text-sm text-slate-400">
-                {isLoggedInUser ? 'Select your new plan tier below. Card re-verification is only required if a balance is due.' : 'Choose your crew tier and create your TradePass account.'}
+                {isLoggedInUser
+                  ? 'Select your new plan tier below. Card re-verification is only required if a balance is due.'
+                  : 'Choose your crew tier and create your TradePass account.'}
               </p>
             </div>
 
-            {error && <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-xl">{error}</div>}
+            {error && (
+              <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-xl">
+                {error}
+              </div>
+            )}
 
             <form onSubmit={handleStartCheckout} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Company Name</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                  Company Name
+                </label>
+
                 <input
                   type="text"
                   required
@@ -207,7 +263,10 @@ function SignupFormContent() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Owner Email</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                  Owner Email
+                </label>
+
                 <input
                   type="email"
                   required
@@ -215,13 +274,18 @@ function SignupFormContent() {
                   disabled={isLoggedInUser}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="vance@electric.com"
-                  className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 ${isLoggedInUser ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  className={`w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 ${
+                    isLoggedInUser ? 'opacity-60 cursor-not-allowed' : ''
+                  }`}
                 />
               </div>
 
               {!isLoggedInUser && (
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Password</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                    Password
+                  </label>
+
                   <input
                     type="password"
                     required
@@ -234,26 +298,45 @@ function SignupFormContent() {
               )}
 
               <div className="space-y-3 pt-2">
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">Select Subscription Tier</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Select Subscription Tier
+                </label>
+
                 {TIERS.map((tier) => (
                   <div
                     key={tier.id}
                     onClick={() => setSelectedPriceId(tier.id)}
                     className={`p-4 rounded-xl border cursor-pointer transition ${
-                      selectedPriceId === tier.id ? 'border-blue-500 bg-blue-950/40' : 'border-slate-800 bg-slate-950 hover:border-slate-700'
+                      selectedPriceId === tier.id
+                        ? 'border-blue-500 bg-blue-950/40'
+                        : 'border-slate-800 bg-slate-950 hover:border-slate-700'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div>
-                        <span className="font-bold text-white text-sm">{tier.name}</span>
-                        <span className="text-blue-400 font-extrabold text-sm ml-2">{tier.price}<span className="text-slate-400 text-xs font-normal">/mo</span></span>
+                        <span className="font-bold text-white text-sm">
+                          {tier.name}
+                        </span>
+
+                        <span className="text-blue-400 font-extrabold text-sm ml-2">
+                          {tier.price}
+                          <span className="text-slate-400 text-xs font-normal">
+                            /mo
+                          </span>
+                        </span>
                       </div>
-                      {selectedPriceId === tier.id && <Check className="w-5 h-5 text-blue-400" />}
+
+                      {selectedPriceId === tier.id && (
+                        <Check className="w-5 h-5 text-blue-400" />
+                      )}
                     </div>
-                    
+
                     <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2 border-t border-slate-800/60 text-xs text-slate-300">
                       {tier.features.map((feature, idx) => (
-                        <li key={idx} className="flex items-center space-x-1.5">
+                        <li
+                          key={idx}
+                          className="flex items-center space-x-1.5"
+                        >
                           <CheckCircle2 className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
                           <span>{feature}</span>
                         </li>
@@ -268,14 +351,22 @@ function SignupFormContent() {
                 disabled={loading}
                 className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition disabled:opacity-50 mt-4 shadow-lg shadow-blue-900/20"
               >
-                {loading ? 'Processing...' : isLoggedInUser ? 'Update Subscription Tier' : 'Continue to Payment'}
+                {loading
+                  ? 'Processing...'
+                  : isLoggedInUser
+                    ? 'Update Subscription Tier'
+                    : 'Continue to Payment'}
               </button>
             </form>
           </>
         ) : (
-          <Elements stripe={stripePromise} options={{ clientSecret }}>
-            <CheckoutForm 
-              uid={userId} // <--- Passing the stable locked-in userId state here
+          <Elements
+            key={clientSecret}
+            stripe={stripePromise}
+            options={{ clientSecret }}
+          >
+            <CheckoutForm
+              uid={userId}
               clientSecret={clientSecret}
               selectedTier={selectedTierObj?.name || 'Subscription'}
               maxWorkers={getMaxWorkersForTier(selectedTierObj?.name)}
@@ -289,7 +380,13 @@ function SignupFormContent() {
 
 export default function SignupPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Loading checkout...</div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">
+          Loading checkout...
+        </div>
+      }
+    >
       <SignupFormContent />
     </Suspense>
   );
