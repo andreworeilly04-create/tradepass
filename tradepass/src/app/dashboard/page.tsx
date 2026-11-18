@@ -189,12 +189,26 @@ export default function DashboardPage() {
   const brandColor = profile?.brandColor || '#0ea5e9';
 
  // PERMISSIVE ACCESS GATE: Allow active, canceling, or currently incomplete checkouts through
+  // PERMISSIVE ACCESS GATE: Securely check subscription status without leaking access
   const cancelAtPeriodEnd = profile?.cancelAtPeriodEnd === true;
-  const subscriptionStatus = profile?.subscriptionStatus || 'free';
+  const subscriptionStatus = profile?.subscriptionStatus;
+
+  // 1. If profile is still loading, show a loading screen instead of flashing the paywall or leaking access
+  if (!profile) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 font-sans">
+        Loading Command Center...
+      </div>
+    );
+  }
+
+  // 2. Strict authorization check once profile data exists
   const isSubscriptionActive = 
     cancelAtPeriodEnd || 
     subscriptionStatus === 'active' || 
-    subscriptionStatus === 'incomplete';
+    subscriptionStatus === 'incomplete' || 
+    subscriptionStatus === 'past_due' || 
+    subscriptionStatus === 'trialing';
 
   const handleSharePassport = async () => {
     if (!user?.uid) return;
