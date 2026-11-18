@@ -488,7 +488,7 @@ export async function POST(req: Request) {
       collection_method: 'charge_automatically',
 
       payment_settings: {
-        save_default_payment_method: 'on_subscription',
+        save_default_payment_method: 'off',
       },
 
       metadata: {
