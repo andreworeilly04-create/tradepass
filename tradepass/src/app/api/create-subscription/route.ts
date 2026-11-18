@@ -1,4 +1,3 @@
-
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { adminDb } from '@/lib/firebaseAdmin';
@@ -356,11 +355,6 @@ export async function POST(req: Request) {
         // UPGRADE
         // ==========================================
 
-        // IMPORTANT:
-        // Do not include payment_settings here.
-        // Stripe does not support payment_settings
-        // with pending_if_incomplete.
-
         const updatedSubscription =
           await stripe.subscriptions.update(
             subscription.id,
@@ -372,11 +366,12 @@ export async function POST(req: Request) {
                 },
               ],
 
-              // Generate the prorated invoice immediately.
-              proration_behavior: 'always_invoice',
+              // Prorate the change immediately
+              proration_behavior: 'create_prorations',
+              cancel_at_period_end: false,
 
-              // Keep the upgrade pending until payment succeeds.
-              payment_behavior: 'pending_if_incomplete',
+              // Force invoice creation and interactive payment intent
+              payment_behavior: 'default_incomplete',
 
               expand: [
                 'latest_invoice.payment_intent',
@@ -492,7 +487,6 @@ export async function POST(req: Request) {
       payment_behavior: 'default_incomplete',
       collection_method: 'charge_automatically',
 
-      // This is allowed when creating a new subscription.
       payment_settings: {
         save_default_payment_method: 'on_subscription',
       },
