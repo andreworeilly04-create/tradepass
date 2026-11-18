@@ -37,8 +37,8 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
       return;
     }
 
-    // 2. Confirm payment or setup intent
-    const result = await stripe.confirmPayment({
+    // 2. Confirm payment intent
+    const { error, paymentIntent } = await stripe.confirmPayment({
       elements,
       confirmParams: {
         return_url: `${window.location.origin}/dashboard`,
@@ -46,12 +46,10 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
       redirect: 'if_required',
     });
 
-    if (result.error) {
-      setMessage(result.error.message || 'An unexpected error occurred during payment.');
+    if (error) {
+      setMessage(error.message || 'An unexpected error occurred during payment.');
       setIsProcessing(false);
-    } else if (
-      result.paymentIntent && result.paymentIntent.status === 'succeeded') 
-       {
+    } else if (paymentIntent && paymentIntent.status === 'succeeded') {
       try {
         // 3. Instantly update Firestore with active tier and worker limits
         await setDoc(doc(db, 'users', uid), {
