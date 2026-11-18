@@ -1,10 +1,9 @@
+
 'use client';
 
 import React, { useState } from 'react';
 import { useStripe, useElements, PaymentElement } from '@stripe/react-stripe-js';
 import { useRouter } from 'next/navigation';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { CreditCard, Lock, Loader2 } from 'lucide-react';
 
 interface CheckoutFormProps {
@@ -14,7 +13,12 @@ interface CheckoutFormProps {
   maxWorkers?: number;
 }
 
-export default function CheckoutForm({ uid, clientSecret, selectedTier = 'Crew Pro', maxWorkers = 25 }: CheckoutFormProps) {
+export default function CheckoutForm({
+  uid,
+  clientSecret,
+  selectedTier = 'Crew Pro',
+  maxWorkers = 25,
+}: CheckoutFormProps) {
   const stripe = useStripe();
   const elements = useElements();
   const router = useRouter();
@@ -25,74 +29,113 @@ export default function CheckoutForm({ uid, clientSecret, selectedTier = 'Crew P
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!stripe || !elements) return;
+    if (!stripe || !elements || isProcessing) return;
 
     setIsProcessing(true);
     setMessage(null);
 
-    // 1. Submit elements for validation before confirming
-    const { error: submitError } = await elements.submit();
-    if (submitError) {
-      setMessage(submitError.message || 'An unexpected error occurred.');
-      setIsProcessing(false);
-      return;
-    }
+    try {
+      // Validate the Stripe Payment Element.
+      const { error: submitError } = await elements.submit();
 
-    // Detect if this is a Setup Intent (seti_) or Payment Intent (pi_)
-    const isSetupIntent = clientSecret?.includes('_secret_seti_') || clientSecret?.startsWith('seti_');
-
-    let result: any;
-
-    if (isSetupIntent) {
-      result = await stripe.confirmSetup({
-        elements,
-        confirmParams: {
-          return_url: `${window.location.origin}/dashboard`,
-        },
-        redirect: 'if_required',
-      });
-    } else {
-      result = await stripe.confirmPayment({
-        elements,
-        confirmParams: {
-          return_url: `${window.location.origin}/dashboard`,
-        },
-        redirect: 'if_required',
-      });
-    }
-
-    if (result.error) {
-      setMessage(result.error.message || 'An unexpected error occurred during processing.');
-      setIsProcessing(false);
-    } else {
-      // 3. Successfully confirmed — update Firestore and route to dashboard immediately
-      try {
-        await setDoc(doc(db, 'users', uid), {
-          planTier: selectedTier,
-          maxWorkers: maxWorkers,
-          subscriptionStatus: 'active',
-          updatedAt: new Date(),
-        }, { merge: true });
-
-        setMessage('Successfully updated! Redirecting to dashboard...');
-        router.push('/dashboard');
-      } catch (dbErr: any) {
-        console.error('Firestore update error:', dbErr);
-        setMessage('Action succeeded, but database sync failed. Please refresh.');
-        setIsProcessing(false);
+      if (submitError) {
+        setMessage(
+          submitError.message || 'Please check your payment details.'
+        );
+        return;
       }
+
+      // Stripe SetupIntent client secrets start with seti_.
+      // PaymentIntent client secrets start with pi_.
+      const isSetupIntent = clientSecret.startsWith('seti_');
+
+      let result: any;
+
+      if (isSetupIntent) {
+        // Confirm card setup when Stripe requires a SetupIntent.
+        result = await stripe.confirmSetup({
+          elements,
+          clientSecret,
+          confirmParams: {
+            return_url: `${window.location.origin}/dashboard`,
+          },
+          redirect: 'if_required',
+        });
+      } else {
+        // Confirm payment when Stripe requires a PaymentIntent.
+        result = await stripe.confirmPayment({
+          elements,
+          clientSecret,
+          confirmParams: {
+            return_url: `${window.location.origin}/dashboard`,
+          },
+          redirect: 'if_required',
+        });
+      }
+
+      // Handle Stripe errors.
+      if (result.error) {
+        setMessage(
+          result.error.message ||
+          'An unexpected error occurred during payment.'
+        );
+        return;
+      }
+
+      // Verify the returned Stripe intent status.
+      const intentStatus = isSetupIntent
+        ? result.setupIntent?.status
+        : result.paymentIntent?.status;
+
+      if (intentStatus !== 'succeeded') {
+        setMessage(
+          `Your payment has not completed yet. Current status: ${
+            intentStatus || 'unknown'
+          }. Please try again or contact support.`
+        );
+        return;
+      }
+
+      // Do not mark Firebase active from the browser.
+      // Stripe subscription status should be synchronized
+      // securely through your Stripe webhook.
+
+      setMessage(
+        'Payment confirmed! Your subscription is being updated. Redirecting...'
+      );
+
+      // Allow the success message to display before redirecting.
+      router.push('/dashboard');
+
+    } catch (error: any) {
+      console.error('Checkout error:', error);
+
+      setMessage(
+        error.message || 'Unable to process payment. Please try again.'
+      );
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl max-w-md w-full">
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-6 bg-slate-900 border border-slate-800 p-6 rounded-2xl shadow-xl max-w-md w-full"
+    >
       <div className="flex items-center space-x-3 pb-4 border-b border-slate-800">
         <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
           <CreditCard className="w-5 h-5" />
         </div>
+
         <div>
-          <h2 className="text-lg font-extrabold text-white">Payment Details</h2>
-          <p className="text-xs text-slate-400">Enter your card details to activate {selectedTier}</p>
+          <h2 className="text-lg font-extrabold text-white">
+            Payment Details
+          </h2>
+
+          <p className="text-xs text-slate-400">
+            Enter your card details to activate {selectedTier}
+          </p>
         </div>
       </div>
 
@@ -102,7 +145,13 @@ export default function CheckoutForm({ uid, clientSecret, selectedTier = 'Crew P
       </div>
 
       {message && (
-        <div className={`p-3 rounded-xl text-xs font-semibold ${message.includes('Successfully') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}`}>
+        <div
+          className={`p-3 rounded-xl text-xs font-semibold ${
+            message.includes('confirmed!')
+              ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+              : 'bg-rose-950 text-rose-400 border border-rose-800'
+          }`}
+        >
           {message}
         </div>
       )}
