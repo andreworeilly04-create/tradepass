@@ -188,10 +188,13 @@ export default function DashboardPage() {
   const isAtCapacity = !isEnterpriseTier && totalActive >= maxWorkers;
   const brandColor = profile?.brandColor || '#0ea5e9';
 
-  // PERMISSIVE ACCESS GATE: If cancelAtPeriodEnd is true, ALWAYS grant full access regardless of subscriptionStatus changes
+ // PERMISSIVE ACCESS GATE: Allow active, canceling, or currently incomplete checkouts through
   const cancelAtPeriodEnd = profile?.cancelAtPeriodEnd === true;
   const subscriptionStatus = profile?.subscriptionStatus || 'free';
-  const isSubscriptionActive = cancelAtPeriodEnd || subscriptionStatus === 'active';
+  const isSubscriptionActive = 
+    cancelAtPeriodEnd || 
+    subscriptionStatus === 'active' || 
+    subscriptionStatus === 'incomplete';
 
   const handleSharePassport = async () => {
     if (!user?.uid) return;
