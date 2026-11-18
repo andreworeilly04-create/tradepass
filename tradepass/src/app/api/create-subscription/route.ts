@@ -41,13 +41,6 @@ export async function POST(req: Request) {
       }
     }
 
-    const maxWorkersLimit =
-      priceId === process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID
-        ? 10
-        : priceId === process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID
-        ? 25
-        : 999;
-
     // Determine tier name dynamically
     let tierNameObj = 'Crew Pro';
     if (priceId === process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID) tierNameObj = 'Standard Crew';
@@ -65,7 +58,6 @@ export async function POST(req: Request) {
           await stripe.subscriptions.cancel(activeSubId);
           console.log(`Canceled abandoned incomplete subscription: ${activeSubId}`);
 
-          // Clear customer default payment method to force manual card entry
           await stripe.customers.update(customer.id, {
             invoice_settings: { default_payment_method: null as any },
           });
@@ -87,8 +79,6 @@ export async function POST(req: Request) {
           if (!clientSecret && newSubscription.pending_setup_intent) {
             clientSecret = (newSubscription.pending_setup_intent as any).client_secret;
           }
-
-          // No premature Firestore write here; webhook handles synchronization upon success
 
           return NextResponse.json({
             success: true,
@@ -112,8 +102,9 @@ export async function POST(req: Request) {
 
         const subscriptionItemId = subscription.items.data[0].id;
 
-        // DOWNGRADE: Update instantly, no payment collection needed, redirect to dashboard
+        // DOWNGRADE: Update instantly (no payment collection needed)
         if (isDowngrade) {
+          const maxWorkersLimit = newRank === 1 ? 10 : 25;
           const updatedSubscription = await stripe.subscriptions.update(activeSubId, {
             items: [{ id: subscriptionItemId, price: priceId }],
             proration_behavior: 'create_prorations',
@@ -140,7 +131,7 @@ export async function POST(req: Request) {
           });
         }
 
-        // UPGRADE or SAME TIER: Force checkout and mandatory new card entry
+        // UPGRADE or SAME TIER: Force checkout, require card entry, keep status incomplete until paid
         await stripe.customers.update(customer.id, {
           invoice_settings: { default_payment_method: null as any },
         });
@@ -150,11 +141,11 @@ export async function POST(req: Request) {
           proration_behavior: 'create_prorations',
           cancel_at_period_end: false,
           metadata: { firebaseUID: uid },
-          payment_behavior: 'default_incomplete',
+          payment_behavior: 'default_incomplete', // Keeps old tier active until payment clears
           payment_settings: {
             save_default_payment_method: 'on_subscription',
           },
-          expand: ['latest_invoice.payment_intent'],
+          expand: ['latest_invoice.payment_intent', 'pending_setup_intent'],
         };
 
         const updatedSubscription = await stripe.subscriptions.update(activeSubId, updateParams);
@@ -167,7 +158,13 @@ export async function POST(req: Request) {
           clientSecret = pi.client_secret;
         }
 
-        // Premature Firestore write removed. Webhook handles tier and status updates upon payment success.
+        if (!clientSecret && (updatedSubscription as any).pending_setup_intent) {
+          const si = (updatedSubscription as any).pending_setup_intent;
+          clientSecret = typeof si === 'string' ? si : si.client_secret;
+        }
+
+        // NO premature Firestore write here. 
+        // The frontend CheckoutForm or webhook will sync the database only after payment succeeds.
 
         return NextResponse.json({
           success: true,
@@ -215,7 +212,13 @@ export async function POST(req: Request) {
       clientSecret = si.client_secret;
     }
 
-    // Brand new signups can safely record initial placeholder metadata since they have no prior active tier
+    const maxWorkersLimit =
+      priceId === process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID
+        ? 10
+        : priceId === process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID
+        ? 25
+        : 999;
+
     await adminDb.collection('users').doc(uid).set(
       {
         companyName,
