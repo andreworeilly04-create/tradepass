@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -188,9 +189,7 @@ export default function DashboardPage() {
   const isAtCapacity = !isEnterpriseTier && totalActive >= maxWorkers;
   const brandColor = profile?.brandColor || '#0ea5e9';
 
- // PERMISSIVE ACCESS GATE: Allow active, canceling, or currently incomplete checkouts through
-  // PERMISSIVE ACCESS GATE: Securely check subscription status without leaking access
-  const cancelAtPeriodEnd = profile?.cancelAtPeriodEnd === true;
+  // SUBSCRIPTION ACCESS GATE: Only active subscriptions and valid trials get dashboard access.
   const subscriptionStatus = profile?.subscriptionStatus;
 
   // 1. If profile is still loading, show a loading screen instead of flashing the paywall or leaking access
@@ -202,12 +201,10 @@ export default function DashboardPage() {
     );
   }
 
-  // 2. Strict authorization check once profile data exists
-  const isSubscriptionActive = 
-    cancelAtPeriodEnd || 
-    subscriptionStatus === 'active' || 
-    subscriptionStatus === 'incomplete' || 
-    subscriptionStatus === 'past_due' || 
+  // 2. Grant access only to active subscriptions or valid trials.
+  // Incomplete checkouts and past-due subscriptions must complete payment before accessing the dashboard.
+  const isSubscriptionActive =
+    subscriptionStatus === 'active' ||
     subscriptionStatus === 'trialing';
 
   const handleSharePassport = async () => {
@@ -450,7 +447,7 @@ export default function DashboardPage() {
               onClick={() => router.push('/signup')}
               className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition shadow-lg shadow-blue-600/20 cursor-pointer"
             >
-              Choose Plan & Complete Checkout
+              Choose Plan &amp; Complete Checkout
             </button>
             <button
               onClick={() => auth.signOut().then(() => router.push('/login'))}
@@ -496,7 +493,7 @@ export default function DashboardPage() {
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5 truncate">
-                Compliance Command Center • Job-site access & worker certifications.
+                Compliance Command Center • Job-site access &amp; worker certifications.
               </p>
             </div>
           </div>
@@ -565,7 +562,7 @@ export default function DashboardPage() {
             <div className="flex items-center space-x-3 w-full md:w-auto justify-end">
               <div className="flex items-center space-x-1.5 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl whitespace-nowrap">
                 <Lock className="w-3.5 h-3.5 shrink-0" />
-                <span>Public Link & Digest Locked</span>
+                <span>Public Link &amp; Digest Locked</span>
               </div>
               <button
                 onClick={() => router.push('/signup')}
@@ -679,7 +676,7 @@ export default function DashboardPage() {
           <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-400 text-sm">
             <div className="flex items-center space-x-3">
               <ShieldAlert className="w-5 h-5 flex-shrink-0" />
-              <span>{planTierDisplay} limit reached ({totalActive}/{maxWorkers} worker profiles). Upgrade to Multi-Crew Enterprise for Unlimited Workers & Staff.</span>
+              <span>{planTierDisplay} limit reached ({totalActive}/{maxWorkers} worker profiles). Upgrade to Multi-Crew Enterprise for Unlimited Workers &amp; Staff.</span>
             </div>
             <button 
               onClick={() => router.push('/signup')}
@@ -716,7 +713,7 @@ export default function DashboardPage() {
         {/* Main Crew Roster Table */}
         <section className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
           <header className="px-4 sm:px-6 py-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <h2 className="text-lg font-bold text-white">Crew Roster & Compliance</h2>
+            <h2 className="text-lg font-bold text-white">Crew Roster &amp; Compliance</h2>
             <span className="text-xs text-slate-400">{filteredWorkers.length} of {isEnterpriseTier ? 'Unlimited' : maxWorkers} profile slots used</span>
           </header>
 
@@ -1118,7 +1115,7 @@ export default function DashboardPage() {
               </header>
 
               <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-                Custom logo & color scheme appear on your TradePass dashboard header and public GC passport links.
+                Custom logo &amp; color scheme appear on your TradePass dashboard header and public GC passport links.
               </p>
 
               <form onSubmit={handleSaveBranding} className="space-y-4">
