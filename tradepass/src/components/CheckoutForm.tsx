@@ -37,7 +37,7 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
       return;
     }
 
-    // 2. Confirm payment or setup intent
+    // 2. Confirm payment or setup intent (handles both new charges and subscription/tier updates)
     const result = await stripe.confirmPayment({
       elements,
       confirmParams: {
@@ -50,7 +50,7 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
       setMessage(result.error.message || 'An unexpected error occurred during payment.');
       setIsProcessing(false);
     } else {
-      // 3. Successfully confirmed (handles both new payments and tier updates/setup intents)
+      // 3. Successfully confirmed — update Firestore and route to dashboard immediately
       try {
         await setDoc(doc(db, 'users', uid), {
           planTier: selectedTier,
