@@ -9,11 +9,12 @@ import { CreditCard, Lock, Loader2 } from 'lucide-react';
 
 interface CheckoutFormProps {
   uid: string;
+  clientSecret: string; // <--- Pass clientSecret as a prop
   selectedTier?: string;
   maxWorkers?: number;
 }
 
-export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorkers = 25 }: CheckoutFormProps) {
+export default function CheckoutForm({ uid, clientSecret, selectedTier = 'Crew Pro', maxWorkers = 25 }: CheckoutFormProps) {
   const stripe = useStripe();
   const elements = useElements();
   const router = useRouter();
@@ -37,17 +38,33 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
       return;
     }
 
-    // 2. Confirm payment or setup intent (handles both new charges and subscription/tier updates)
-    const result = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        return_url: `${window.location.origin}/dashboard`,
-      },
-      redirect: 'if_required',
-    });
+    // Detect if this is a Setup Intent (seti_) or Payment Intent (pi_)
+    const isSetupIntent = clientSecret?.includes('_secret_seti_') || clientSecret?.startsWith('seti_');
+
+    let result: any;
+
+    if (isSetupIntent) {
+      // Use confirmSetup for setup intents (common in upgrades/zero-dollar flows)
+      result = await stripe.confirmSetup({
+        elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/dashboard`,
+        },
+        redirect: 'if_required',
+      });
+    } else {
+      // Use confirmPayment for standard payment intents
+      result = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/dashboard`,
+        },
+        redirect: 'if_required',
+      });
+    }
 
     if (result.error) {
-      setMessage(result.error.message || 'An unexpected error occurred during payment.');
+      setMessage(result.error.message || 'An unexpected error occurred during processing.');
       setIsProcessing(false);
     } else {
       // 3. Successfully confirmed — update Firestore and route to dashboard immediately
@@ -82,12 +99,12 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
       </div>
 
       {/* Embedded Stripe Payment Element */}
-      <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+      <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 min-h-[150px]">
         <PaymentElement />
       </div>
 
       {message && (
-        <div className={`p-3 rounded-xl text-xs font-semibold ${message.includes('Successfully') || message.includes('successful') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}`}>
+        <div className={`p-3 rounded-xl text-xs font-semibold ${message.includes('Successfully') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}`}>
           {message}
         </div>
       )}
