@@ -356,29 +356,39 @@ export async function POST(req: Request) {
         // ==========================================
 
         const updatedSubscription =
-          await stripe.subscriptions.update(
-            subscription.id,
+            const updatedSubscription =
+      await stripe.subscriptions.update(
+        subscription.id,
+        {
+          items: [
             {
-              items: [
-                {
-                  id: currentItem.id,
-                  price: priceId,
-                },
-              ],
+              id: currentItem.id,
+              price: priceId,
+            },
+          ],
 
-              // Prorate the change immediately
-              proration_behavior: 'create_prorations',
-              cancel_at_period_end: false,
+          // FIX 1: Change to 'always_invoice' so Stripe immediately generates the invoice due now
+          proration_behavior: 'always_invoice',
+          cancel_at_period_end: false,
 
-              // Force invoice creation and interactive payment intent
-              payment_behavior: 'default_incomplete',
+          // Force invoice creation and interactive payment intent
+          payment_behavior: 'default_incomplete',
 
-              expand: [
-                'latest_invoice.payment_intent',
-                'pending_setup_intent',
-              ],
-            }
-          );
+          // FIX 2: Ensure old default payment method is cleared so it doesn't auto-charge
+          default_payment_method: '',
+
+          // FIX 3: Prevent saving the new card to the customer's profile
+          payment_settings: {
+            save_default_payment_method: 'off',
+          },
+
+          expand: [
+            'latest_invoice.payment_intent',
+            'pending_setup_intent',
+          ],
+        }
+      );
+
 
         const intent = await getSubscriptionClientSecret(
           updatedSubscription
