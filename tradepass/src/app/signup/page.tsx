@@ -9,7 +9,7 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { Check, ArrowLeft, CheckCircle2 } from 'lucide-react';
-import CheckoutForm from '@/components/CheckoutForm'; // Imports your standalone component
+import CheckoutForm from '@/components/CheckoutForm';
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
 
@@ -141,8 +141,12 @@ function SignupFormContent() {
         return;
       }
 
-      // Otherwise (e.g. instant downgrade), sync is complete so redirect straight to dashboard
-      router.push('/dashboard');
+      // Only route straight to dashboard if it's explicitly marked as a downgrade
+      if (data.isDowngrade) {
+        router.push('/dashboard');
+      } else {
+        setError('Payment intent could not be generated. Please check your card or inputs.');
+      }
 
     } catch (err: any) {
       setError(err.message);
@@ -268,6 +272,7 @@ function SignupFormContent() {
           <Elements stripe={stripePromise} options={{ clientSecret }}>
             <CheckoutForm 
               uid={auth.currentUser?.uid || ''}
+              clientSecret={clientSecret}
               selectedTier={selectedTierObj?.name || 'Subscription'}
               maxWorkers={getMaxWorkersForTier(selectedTierObj?.name)}
             />
