@@ -1,26 +1,16 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { adminDb } from '@/lib/firebaseAdmin';
+import { FieldValue } from 'firebase-admin/firestore';
 
-if (!getApps().length) {
-  initializeApp({
-    credential: cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    }),
-  });
-}
-
-const db = getFirestore();
-
-// Updated to match your Stripe Dashboard webhook endpoint version
+// Initialize Stripe with the modern webhook version
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-10-28.endive' as any,
 });
 
-// Helper to resolve priceId to tier name & worker limits
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+
+// Helper function to map Stripe price IDs to your app's tier details
 function getTierDetails(priceId: string) {
   if (priceId === process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID) {
     return { planTier: 'Standard Crew', maxWorkers: 10 };
@@ -35,6 +25,7 @@ function getTierDetails(priceId: string) {
 }
 
 export async function POST(req: Request) {
+  const body = await req.text();
   const signature = req.headers.get('stripe-signature');
 
   if (!signature) {
@@ -44,12 +35,7 @@ export async function POST(req: Request) {
   let event: Stripe.Event;
 
   try {
-    const bodyText = await req.text();
-    event = stripe.webhooks.constructEvent(
-      bodyText,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
+    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
   } catch (err: any) {
     console.error(`Webhook signature verification failed: ${err.message}`);
     return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
@@ -57,48 +43,54 @@ export async function POST(req: Request) {
 
   try {
     switch (event.type) {
+      // 1. PAYMENT SUCCEEDED: This is the exclusive trigger that assigns paid tiers
       case 'invoice.payment_succeeded': {
-        const invoice = event.data.object as Stripe.Invoice;
-        const subField = (invoice as any)?.subscription;
-        const subscriptionId = typeof subField === 'string' 
-          ? subField 
-          : subField && typeof subField === 'object' && 'id' in subField 
-            ? (subField as any).id 
-            : null;
+        const invoice = event.data.object as Stripe.Invoice as any;
+        const subscriptionId = invoice.subscription as string;
+        const customerId = invoice.customer as string;
 
         if (!subscriptionId) break;
 
-        // Retrieve subscription to get the latest active price ID
         const subscription = await stripe.subscriptions.retrieve(subscriptionId);
         const priceId = subscription.items.data[0]?.price.id;
         const tierInfo = priceId ? getTierDetails(priceId) : null;
 
-        const usersSnapshot = await db.collection('users').where('subscriptionId', '==', subscriptionId).get();
+        // Find user by subscriptionId or fallback to Stripe customer ID / metadata
+        let usersSnapshot = await adminDb
+          .collection('users')
+          .where('subscriptionId', '==', subscriptionId)
+          .get();
 
-        if (!usersSnapshot.empty) {
-          const batch = db.batch();
+        if (usersSnapshot.empty && customerId) {
+          // Fallback lookup via metadata if firebaseUID was stored in customer metadata
+          const customer = await stripe.customers.retrieve(customerId);
+          if (!customer.deleted && customer.metadata?.firebaseUID) {
+            const userDoc = await adminDb.collection('users').doc(customer.metadata.firebaseUID).get();
+            if (userDoc.exists) {
+              usersSnapshot = { empty: false, docs: [userDoc] } as any;
+            }
+          }
+        }
+
+        if (!usersSnapshot.empty && tierInfo) {
+          const batch = adminDb.batch();
           usersSnapshot.docs.forEach((userDoc) => {
-            const updateData: any = {
+            batch.update(userDoc.ref, {
+              planTier: tierInfo.planTier,
+              maxWorkers: tierInfo.maxWorkers,
+              subscriptionId: subscriptionId,
               subscriptionStatus: 'active',
-              subscriptionId: subscription.id,
               cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
               updatedAt: FieldValue.serverTimestamp(),
-            };
-
-            // If a valid tier was found from the paid invoice price, sync it!
-            if (tierInfo) {
-              updateData.planTier = tierInfo.planTier;
-              updateData.maxWorkers = tierInfo.maxWorkers;
-            }
-
-            batch.update(userDoc.ref, updateData);
+            });
           });
           await batch.commit();
-          console.log(`Successfully activated & synchronized subscription for sub ID: ${subscriptionId}`);
+          console.log(`Successfully upgraded user tier on payment success for subscription: ${subscriptionId}`);
         }
         break;
       }
 
+      // 2. SUBSCRIPTION UPDATED: Manages statuses only (Prevents premature tier updates)
       case 'customer.subscription.updated': {
         const subscription = event.data.object as Stripe.Subscription;
         const subscriptionId = subscription?.id;
@@ -106,70 +98,71 @@ export async function POST(req: Request) {
 
         if (!subscriptionId || !status) break;
 
-        // Ignore incomplete states so abandoned checkouts do not grant paid access
+        // Ignore incomplete states so abandoned checkouts do not grant access
         if (status === 'incomplete' || status === 'incomplete_expired') {
           console.log(`Skipping status update for incomplete subscription: ${subscriptionId}`);
           break;
         }
 
-        const priceId = subscription.items.data[0]?.price.id;
-        const tierInfo = priceId ? getTierDetails(priceId) : null;
-
-        const usersSnapshot = await db.collection('users').where('subscriptionId', '==', subscriptionId).get();
+        const usersSnapshot = await adminDb
+          .collection('users')
+          .where('subscriptionId', '==', subscriptionId)
+          .get();
 
         if (!usersSnapshot.empty) {
-          const batch = db.batch();
+          const batch = adminDb.batch();
           usersSnapshot.docs.forEach((userDoc) => {
+            // NOTE: planTier and maxWorkers are intentionally omitted here.
+            // Tier modifications are deferred entirely to invoice.payment_succeeded.
             const updateData: any = {
               subscriptionStatus: status,
               cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
               updatedAt: FieldValue.serverTimestamp(),
             };
 
-            // Dynamically update tier & limits if price changed (e.g. instant downgrade or confirmed upgrade)
-            if (tierInfo) {
-              updateData.planTier = tierInfo.planTier;
-              updateData.maxWorkers = tierInfo.maxWorkers;
-            }
-
             batch.update(userDoc.ref, updateData);
           });
           await batch.commit();
-          console.log(`Updated subscription ${subscriptionId} status to: ${status} with tier info.`);
+          console.log(`Updated subscription ${subscriptionId} status to: ${status} (tier changes deferred).`);
         }
         break;
       }
 
+      // 3. SUBSCRIPTION DELETED / CANCELED
       case 'customer.subscription.deleted': {
         const subscription = event.data.object as Stripe.Subscription;
         const subscriptionId = subscription?.id;
 
         if (!subscriptionId) break;
 
-        const usersSnapshot = await db.collection('users').where('subscriptionId', '==', subscriptionId).get();
+        const usersSnapshot = await adminDb
+          .collection('users')
+          .where('subscriptionId', '==', subscriptionId)
+          .get();
 
         if (!usersSnapshot.empty) {
-          const batch = db.batch();
+          const batch = adminDb.batch();
           usersSnapshot.docs.forEach((userDoc) => {
             batch.update(userDoc.ref, {
               subscriptionStatus: 'canceled',
-              cancelAtPeriodEnd: false,
+              planTier: 'Free', // Or your default free tier name
+              maxWorkers: 3,    // Default free worker limit
               updatedAt: FieldValue.serverTimestamp(),
             });
           });
           await batch.commit();
-          console.log(`Marked subscription ${subscriptionId} as canceled.`);
+          console.log(`Processed cancellation for subscription: ${subscriptionId}`);
         }
         break;
       }
 
       default:
-        console.log(`Unhandled Stripe event type: ${event.type}`);
+        console.log(`Unhandled event type: ${event.type}`);
     }
-  } catch (dbErr: any) {
-    console.error('Firebase Admin Webhook Error:', dbErr);
-    return NextResponse.json({ error: `Database update failed: ${dbErr.message}` }, { status: 500 });
-  }
 
-  return NextResponse.json({ received: true }, { status: 200 });
+    return NextResponse.json({ received: true }, { status: 200 });
+  } catch (err: any) {
+    console.error(`Webhook processing error for ${event.type}:`, err);
+    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
+  }
 }
