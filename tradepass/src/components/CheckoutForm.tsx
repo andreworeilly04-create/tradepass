@@ -9,8 +9,8 @@ import { CreditCard, Lock, Loader2 } from 'lucide-react';
 
 interface CheckoutFormProps {
   uid: string;
-  selectedTier?: string;   // Optional prop if passed from signup parent
-  maxWorkers?: number;     // Optional prop if passed from signup parent
+  selectedTier?: string;
+  maxWorkers?: number;
 }
 
 export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorkers = 25 }: CheckoutFormProps) {
@@ -29,7 +29,16 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
     setIsProcessing(true);
     setMessage(null);
 
-    const { error, paymentIntent } = await stripe.confirmPayment({
+    // 1. Submit elements for validation before confirming
+    const { error: submitError } = await elements.submit();
+    if (submitError) {
+      setMessage(submitError.message || 'An unexpected error occurred.');
+      setIsProcessing(false);
+      return;
+    }
+
+    // 2. Confirm payment or setup intent
+    const result = await stripe.confirmPayment({
       elements,
       confirmParams: {
         return_url: `${window.location.origin}/dashboard`,
@@ -37,12 +46,14 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
       redirect: 'if_required',
     });
 
-    if (error) {
-      setMessage(error.message || 'An unexpected error occurred during payment.');
+    if (result.error) {
+      setMessage(result.error.message || 'An unexpected error occurred during payment.');
       setIsProcessing(false);
-    } else if (paymentIntent && paymentIntent.status === 'succeeded') {
+    } else if (
+      result.paymentIntent && result.paymentIntent.status === 'succeeded') 
+       {
       try {
-        // Instantly mark user's subscription and worker limits active in Firestore
+        // 3. Instantly update Firestore with active tier and worker limits
         await setDoc(doc(db, 'users', uid), {
           planTier: selectedTier,
           maxWorkers: maxWorkers,
@@ -50,11 +61,11 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
           updatedAt: new Date(),
         }, { merge: true });
 
-        setMessage('Payment successful! Redirecting to dashboard...');
+        setMessage('Successfully updated! Redirecting to dashboard...');
         router.push('/dashboard');
       } catch (dbErr: any) {
         console.error('Firestore update error:', dbErr);
-        setMessage('Payment succeeded, but database sync failed. Please contact support.');
+        setMessage('Action succeeded, but database sync failed. Please refresh.');
         setIsProcessing(false);
       }
     } else {
@@ -80,7 +91,7 @@ export default function CheckoutForm({ uid, selectedTier = 'Crew Pro', maxWorker
       </div>
 
       {message && (
-        <div className={`p-3 rounded-xl text-xs font-semibold ${message.includes('successful') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}`}>
+        <div className={`p-3 rounded-xl text-xs font-semibold ${message.includes('Successfully') || message.includes('successful') ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-rose-950 text-rose-400 border border-rose-800'}`}>
           {message}
         </div>
       )}
