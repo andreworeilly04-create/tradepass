@@ -112,6 +112,12 @@ function SignupFormContent() {
   const handleStartCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // GUARD: If logged in, ensure profile has finished loading so subscriptionId isn't undefined
+    if (isLoggedInUser && !profile) {
+      setError('Loading your account details. Please wait a second and try again.');
+      return;
+    }
+
     if (
       !email ||
       (!isLoggedInUser && !password) ||
@@ -121,6 +127,8 @@ function SignupFormContent() {
       setError('Please fill in all required fields.');
       return;
     }
+    
+    // ... rest of your code
 
     setLoading(true);
     setError('');
