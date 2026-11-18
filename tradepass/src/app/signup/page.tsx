@@ -4,11 +4,12 @@ import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { loadStripe } from '@stripe/stripe-js';
-import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { Elements } from '@stripe/react-stripe-js';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { Check, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import CheckoutForm from '@/components/CheckoutForm'; // Imports your standalone component
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
 
@@ -57,65 +58,6 @@ interface UserProfile {
   email?: string;
   planTier?: string;
   subscriptionId?: string;
-}
-
-function CheckoutForm({ clientSecret, tierName, onBack }: { clientSecret: string; tierName: string; onBack: () => void }) {
-  const stripe = useStripe();
-  const elements = useElements();
-  const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!stripe || !elements) return;
-
-    setLoading(true);
-    setErrorMessage('');
-
-    const { error } = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        return_url: `${window.location.origin}/dashboard`,
-      },
-    });
-
-    if (error) {
-      setErrorMessage(error.message || 'Payment failed.');
-      setLoading(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="flex items-center justify-between mb-2">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-400 hover:text-white transition"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to Tier Selection</span>
-        </button>
-      </div>
-
-      <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl">
-        <p className="text-xs text-slate-400 uppercase font-semibold">Selected Tier</p>
-        <p className="text-lg font-bold text-white">{tierName}</p>
-      </div>
-
-      <PaymentElement />
-
-      {errorMessage && <div className="text-rose-400 text-sm">{errorMessage}</div>}
-
-      <button
-        type="submit"
-        disabled={!stripe || loading}
-        className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 shadow-lg shadow-blue-900/20"
-      >
-        {loading ? 'Processing Payment...' : 'Confirm Plan & Activate'}
-      </button>
-    </form>
-  );
 }
 
 function SignupFormContent() {
@@ -210,6 +152,14 @@ function SignupFormContent() {
   };
 
   const selectedTierObj = TIERS.find(t => t.id === selectedPriceId);
+
+  // Determine max workers dynamically based on the selected tier name
+  const getMaxWorkersForTier = (name?: string) => {
+    if (!name) return 10;
+    if (name.toLowerCase().includes('pro')) return 25;
+    if (name.toLowerCase().includes('enterprise') || name.toLowerCase().includes('multi')) return 999;
+    return 10;
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center py-12 px-6">
@@ -317,15 +267,9 @@ function SignupFormContent() {
         ) : (
           <Elements stripe={stripePromise} options={{ clientSecret }}>
             <CheckoutForm 
-              clientSecret={clientSecret} 
-              tierName={selectedTierObj?.name || 'Subscription'} 
-              onBack={() => {
-                setClientSecret('');
-                setError('');
-                if (profile) {
-                  setProfile({ ...profile, subscriptionId: undefined });
-                }
-              }} 
+              uid={auth.currentUser?.uid || ''}
+              selectedTier={selectedTierObj?.name || 'Subscription'}
+              maxWorkers={getMaxWorkersForTier(selectedTierObj?.name)}
             />
           </Elements>
         )}
