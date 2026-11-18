@@ -9,7 +9,7 @@ import { CreditCard, Lock, Loader2 } from 'lucide-react';
 
 interface CheckoutFormProps {
   uid: string;
-  clientSecret: string; // <--- Pass clientSecret as a prop
+  clientSecret: string;
   selectedTier?: string;
   maxWorkers?: number;
 }
@@ -44,7 +44,6 @@ export default function CheckoutForm({ uid, clientSecret, selectedTier = 'Crew P
     let result: any;
 
     if (isSetupIntent) {
-      // Use confirmSetup for setup intents (common in upgrades/zero-dollar flows)
       result = await stripe.confirmSetup({
         elements,
         confirmParams: {
@@ -53,7 +52,6 @@ export default function CheckoutForm({ uid, clientSecret, selectedTier = 'Crew P
         redirect: 'if_required',
       });
     } else {
-      // Use confirmPayment for standard payment intents
       result = await stripe.confirmPayment({
         elements,
         confirmParams: {

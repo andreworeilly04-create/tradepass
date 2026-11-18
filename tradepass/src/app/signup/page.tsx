@@ -76,6 +76,7 @@ function SignupFormContent() {
   const [password, setPassword] = useState('');
   const [selectedPriceId, setSelectedPriceId] = useState(getInitialPriceId());
   const [clientSecret, setClientSecret] = useState('');
+  const [userId, setUserId] = useState(''); // <--- Stable UID state variable
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isLoggedInUser, setIsLoggedInUser] = useState(false);
@@ -86,6 +87,7 @@ function SignupFormContent() {
       if (currentUser) {
         setIsLoggedInUser(true);
         setEmail(currentUser.email || '');
+        setUserId(currentUser.uid); // <--- Capture if already logged in
 
         const userDocRef = doc(db, 'users', currentUser.uid);
         const userSnap = await getDoc(userDocRef);
@@ -118,6 +120,8 @@ function SignupFormContent() {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         uid = userCredential.user.uid;
       }
+
+      setUserId(uid); // <--- Lock in the UID state so it's guaranteed never to be empty
 
       // Backend API route handles Stripe setup AND secure Firestore database updates
       const res = await fetch('/api/create-subscription', {
@@ -271,7 +275,7 @@ function SignupFormContent() {
         ) : (
           <Elements stripe={stripePromise} options={{ clientSecret }}>
             <CheckoutForm 
-              uid={auth.currentUser?.uid || ''}
+              uid={userId} // <--- Passing the stable locked-in userId state here
               clientSecret={clientSecret}
               selectedTier={selectedTierObj?.name || 'Subscription'}
               maxWorkers={getMaxWorkersForTier(selectedTierObj?.name)}
