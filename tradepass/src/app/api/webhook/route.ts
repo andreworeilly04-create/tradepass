@@ -43,7 +43,7 @@ export async function POST(req: Request) {
 
   try {
     switch (event.type) {
-      // 1. PAYMENT SUCCEEDED: This is the exclusive trigger that assigns paid tiers
+      // 1. PAYMENT SUCCEEDED: The exclusive trigger that assigns paid tiers safely
       case 'invoice.payment_succeeded': {
         const invoice = event.data.object as Stripe.Invoice as any;
         const subscriptionId = invoice.subscription as string;
@@ -55,14 +55,14 @@ export async function POST(req: Request) {
         const priceId = subscription.items.data[0]?.price.id;
         const tierInfo = priceId ? getTierDetails(priceId) : null;
 
-        // Find user by subscriptionId or fallback to Stripe customer ID / metadata
+        // Find user by subscriptionId
         let usersSnapshot = await adminDb
           .collection('users')
           .where('subscriptionId', '==', subscriptionId)
           .get();
 
         if (usersSnapshot.empty && customerId) {
-          // Fallback lookup via metadata if firebaseUID was stored in customer metadata
+          // Fallback lookup via Stripe customer metadata
           const customer = await stripe.customers.retrieve(customerId);
           if (!customer.deleted && customer.metadata?.firebaseUID) {
             const userDoc = await adminDb.collection('users').doc(customer.metadata.firebaseUID).get();
@@ -90,19 +90,13 @@ export async function POST(req: Request) {
         break;
       }
 
-      // 2. SUBSCRIPTION UPDATED: Manages statuses only (Prevents premature tier updates)
+      // 2. SUBSCRIPTION UPDATED: Manages statuses gracefully without blocking incomplete checkouts
       case 'customer.subscription.updated': {
         const subscription = event.data.object as Stripe.Subscription;
         const subscriptionId = subscription?.id;
         const status = subscription?.status;
 
         if (!subscriptionId || !status) break;
-
-        // Ignore incomplete states so abandoned checkouts do not grant access
-        if (status === 'incomplete' || status === 'incomplete_expired') {
-          console.log(`Skipping status update for incomplete subscription: ${subscriptionId}`);
-          break;
-        }
 
         const usersSnapshot = await adminDb
           .collection('users')
@@ -112,8 +106,8 @@ export async function POST(req: Request) {
         if (!usersSnapshot.empty) {
           const batch = adminDb.batch();
           usersSnapshot.docs.forEach((userDoc) => {
-            // NOTE: planTier and maxWorkers are intentionally omitted here.
-            // Tier modifications are deferred entirely to invoice.payment_succeeded.
+            // Allow tracking status changes (including incomplete during active checkout flow)
+            // but preserve active tier security until payment_succeeded fires.
             const updateData: any = {
               subscriptionStatus: status,
               cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
@@ -123,7 +117,7 @@ export async function POST(req: Request) {
             batch.update(userDoc.ref, updateData);
           });
           await batch.commit();
-          console.log(`Updated subscription ${subscriptionId} status to: ${status} (tier changes deferred).`);
+          console.log(`Updated subscription ${subscriptionId} status to: ${status}`);
         }
         break;
       }
@@ -145,8 +139,8 @@ export async function POST(req: Request) {
           usersSnapshot.docs.forEach((userDoc) => {
             batch.update(userDoc.ref, {
               subscriptionStatus: 'canceled',
-              planTier: 'Free', // Or your default free tier name
-              maxWorkers: 3,    // Default free worker limit
+              planTier: 'Free',
+              maxWorkers: 3,
               updatedAt: FieldValue.serverTimestamp(),
             });
           });
