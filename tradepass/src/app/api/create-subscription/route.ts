@@ -88,15 +88,7 @@ export async function POST(req: Request) {
             clientSecret = (newSubscription.pending_setup_intent as any).client_secret;
           }
 
-          // Keep subscriptionId updated for abandoned retries, but don't force planTier change yet
-          await adminDb.collection('users').doc(uid).set(
-            {
-              subscriptionId: newSubscription.id,
-              subscriptionStatus: 'incomplete',
-              updatedAt: new Date(),
-            },
-            { merge: true }
-          );
+          // No premature Firestore write here; webhook handles synchronization upon success
 
           return NextResponse.json({
             success: true,
@@ -175,15 +167,7 @@ export async function POST(req: Request) {
           clientSecret = pi.client_secret;
         }
 
-        // DO NOT write planTier/maxWorkers here yet. Let the webhook handle it upon successful payment.
-        await adminDb.collection('users').doc(uid).set(
-          {
-            subscriptionId: updatedSubscription.id,
-            subscriptionStatus: updatedSubscription.status,
-            updatedAt: new Date(),
-          },
-          { merge: true }
-        );
+        // Premature Firestore write removed. Webhook handles tier and status updates upon payment success.
 
         return NextResponse.json({
           success: true,
@@ -231,7 +215,7 @@ export async function POST(req: Request) {
       clientSecret = si.client_secret;
     }
 
-    // Brand new signups can safely record initial tier info since they have no prior active tier
+    // Brand new signups can safely record initial placeholder metadata since they have no prior active tier
     await adminDb.collection('users').doc(uid).set(
       {
         companyName,
