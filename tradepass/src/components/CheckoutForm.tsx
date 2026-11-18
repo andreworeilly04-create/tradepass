@@ -39,6 +39,7 @@ export default function CheckoutForm({
       const { error: submitError } = await elements.submit();
 
       if (submitError) {
+        console.error('🔍 Elements Submit Error:', submitError);
         setMessage(
           submitError.message || 'Please check your payment details.'
         );
@@ -48,6 +49,8 @@ export default function CheckoutForm({
       // Stripe SetupIntent client secrets start with seti_.
       // PaymentIntent client secrets start with pi_.
       const isSetupIntent = clientSecret.startsWith('seti_');
+      console.log('🔍 Intent Type:', isSetupIntent ? 'SetupIntent' : 'PaymentIntent');
+      console.log('🔍 Client Secret:', clientSecret);
 
       let result: any;
 
@@ -73,8 +76,11 @@ export default function CheckoutForm({
         });
       }
 
+      console.log('🔍 Stripe Confirmation Raw Result:', result);
+
       // Handle Stripe errors.
       if (result.error) {
+        console.error('🔍 Stripe Confirmation Error Object:', result.error);
         setMessage(
           result.error.message ||
           'An unexpected error occurred during payment.'
@@ -87,6 +93,8 @@ export default function CheckoutForm({
         ? result.setupIntent?.status
         : result.paymentIntent?.status;
 
+      console.log('🔍 Confirmed Intent Status:', intentStatus);
+
       if (intentStatus !== 'succeeded') {
         setMessage(
           `Your payment has not completed yet. Current status: ${
@@ -96,19 +104,14 @@ export default function CheckoutForm({
         return;
       }
 
-      // Do not mark Firebase active from the browser.
-      // Stripe subscription status should be synchronized
-      // securely through your Stripe webhook.
-
       setMessage(
         'Payment confirmed! Your subscription is being updated. Redirecting...'
       );
 
-      // Allow the success message to display before redirecting.
       router.push('/dashboard');
 
     } catch (error: any) {
-      console.error('Checkout error:', error);
+      console.error('🔍 Checkout Exception Error:', error);
 
       setMessage(
         error.message || 'Unable to process payment. Please try again.'
