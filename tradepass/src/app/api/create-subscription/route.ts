@@ -17,10 +17,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Find or create customer first so we always have a reliable customer ID
     const customers = await stripe.customers.list({ email, limit: 1 });
     let customer = customers.data[0];
-
     let activeSubId = subscriptionId;
 
     if (!customer) {
@@ -30,7 +28,6 @@ export async function POST(req: Request) {
         metadata: { firebaseUID: uid, companyName: companyName },
       });
     } else {
-      // Ensure customer metadata/name is always fresh
       await stripe.customers.update(customer.id, {
         name: companyName,
         metadata: { firebaseUID: uid, companyName: companyName },
@@ -38,7 +35,6 @@ export async function POST(req: Request) {
     }
 
     if (!activeSubId) {
-      // Fallback: If logged in / existing customer but subscriptionId wasn't passed, find their latest subscription
       const existingSubs = await stripe.subscriptions.list({
         customer: customer.id,
         status: 'all',
@@ -49,7 +45,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // Determine tier name dynamically
     let tierNameObj = 'Crew Pro';
     if (priceId === process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID) tierNameObj = 'Standard Crew';
     else if (priceId === process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID) tierNameObj = 'Multi-Crew Enterprise';
@@ -58,50 +53,7 @@ export async function POST(req: Request) {
     if (activeSubId) {
       const subscription = await stripe.subscriptions.retrieve(activeSubId);
 
-      if (subscription.status === 'canceled' || subscription.status === 'incomplete_expired') {
-        // Drop down to creation logic below if subscription is dead
-      } else {
-        if (subscription.status === 'incomplete') {
-          await stripe.subscriptions.cancel(activeSubId);
-          console.log(`Canceled abandoned incomplete subscription: ${activeSubId}`);
-
-          await stripe.customers.update(customer.id, {
-            invoice_settings: { default_payment_method: null as any },
-          });
-
-          const newSubscription = await stripe.subscriptions.create({
-            customer: customer.id,
-            items: [{ price: priceId }],
-            payment_behavior: 'default_incomplete',
-            collection_method: 'charge_automatically',
-            payment_settings: { save_default_payment_method: 'on_subscription' },
-            metadata: { firebaseUID: uid },
-            expand: ['latest_invoice.payment_intent', 'pending_setup_intent'],
-          });
-
-          let clientSecret: string | undefined = undefined;
-          const latestInv = newSubscription.latest_invoice as any;
-          if (latestInv && typeof latestInv === 'object') {
-            if (latestInv.payment_intent && typeof latestInv.payment_intent === 'object') {
-              clientSecret = (latestInv.payment_intent as any).client_secret;
-            }
-          }
-          if (!clientSecret && latestInv && typeof latestInv === 'string') {
-            const invObj = await stripe.invoices.retrieve(latestInv, { expand: ['payment_intent'] }) as any;
-            clientSecret = invObj.payment_intent?.client_secret;
-          }
-          if (!clientSecret && newSubscription.pending_setup_intent) {
-            const si = newSubscription.pending_setup_intent;
-            clientSecret = typeof si === 'string' ? si : (si as any).client_secret;
-          }
-
-          return NextResponse.json({
-            success: true,
-            subscriptionId: newSubscription.id,
-            clientSecret,
-          });
-        }
-
+      if (subscription.status !== 'canceled' && subscription.status !== 'incomplete_expired') {
         const currentPriceId = subscription.items.data[0].price.id;
         
         const priceRanks: Record<string, number> = {
@@ -113,10 +65,9 @@ export async function POST(req: Request) {
         const oldRank = priceRanks[currentPriceId] || 0;
         const newRank = priceRanks[priceId] || 0;
         const isDowngrade = newRank < oldRank;
-
         const subscriptionItemId = subscription.items.data[0].id;
 
-        // DOWNGRADE: Update instantly (no payment collection needed)
+        // DOWNGRADE: Update instantly, no card required
         if (isDowngrade) {
           const maxWorkersLimit = newRank === 1 ? 10 : 25;
           const updatedSubscription = await stripe.subscriptions.update(activeSubId, {
@@ -140,12 +91,12 @@ export async function POST(req: Request) {
 
           return NextResponse.json({
             success: true,
+            isDowngrade: true, // Explicit flag so frontend knows not to look for a clientSecret
             subscriptionId: updatedSubscription.id,
-            clientSecret: undefined,
           });
         }
 
-        // UPGRADE or SAME TIER: Force checkout, require card entry
+        // UPGRADE or SAME TIER: Force card entry by clearing customer default payment method
         await stripe.customers.update(customer.id, {
           invoice_settings: { default_payment_method: null as any },
         });
@@ -175,10 +126,6 @@ export async function POST(req: Request) {
           const invObj = await stripe.invoices.retrieve(latestInvoice, { expand: ['payment_intent'] }) as any;
           clientSecret = invObj.payment_intent?.client_secret;
         }
-        if (!clientSecret && updatedSubscription.pending_setup_intent) {
-          const si = updatedSubscription.pending_setup_intent;
-          clientSecret = typeof si === 'string' ? si : (si as any).client_secret;
-        }
 
         return NextResponse.json({
           success: true,
@@ -188,7 +135,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // SCENARIO B: Brand-new user signing up for the first time
+    // SCENARIO B: Brand-new user signing up
     await stripe.customers.update(customer.id, {
       invoice_settings: { default_payment_method: null as any },
     });
@@ -226,10 +173,6 @@ export async function POST(req: Request) {
     if (!clientSecret && latestInvoice && typeof latestInvoice === 'string') {
       const invObj = await stripe.invoices.retrieve(latestInvoice, { expand: ['payment_intent'] }) as any;
       clientSecret = invObj.payment_intent?.client_secret;
-    }
-    if (!clientSecret && subscription.pending_setup_intent) {
-      const si = subscription.pending_setup_intent;
-      clientSecret = typeof si === 'string' ? si : (si as any).client_secret;
     }
 
     const maxWorkersLimit =
