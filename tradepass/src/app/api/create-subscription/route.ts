@@ -366,12 +366,17 @@ export async function POST(req: Request) {
                 },
               ],
 
-              // Prorate the change immediately
-              proration_behavior: 'create_prorations',
+              // Force immediate invoice generation and proration calculation
+              proration_behavior: 'always_invoice',
               cancel_at_period_end: false,
 
               // Force invoice creation and interactive payment intent
               payment_behavior: 'default_incomplete',
+
+              // Prevent saving the new card to the customer's profile
+              payment_settings: {
+                save_default_payment_method: 'off',
+              },
 
               expand: [
                 'latest_invoice.payment_intent',
@@ -461,8 +466,6 @@ export async function POST(req: Request) {
     // SCENARIO B: BRAND-NEW SUBSCRIPTION
     // ==========================================
 
-    // Cancel any remaining incomplete subscriptions belonging
-    // to this customer before creating a replacement.
     const existingIncomplete =
       await stripe.subscriptions.list({
         customer: customer.id,
@@ -474,7 +477,6 @@ export async function POST(req: Request) {
       await stripe.subscriptions.cancel(oldSubscription.id);
     }
 
-    // Create the new subscription.
     const subscription = await stripe.subscriptions.create({
       customer: customer.id,
 
@@ -487,6 +489,7 @@ export async function POST(req: Request) {
       payment_behavior: 'default_incomplete',
       collection_method: 'charge_automatically',
 
+      // Prevent saving the new card to the customer's profile
       payment_settings: {
         save_default_payment_method: 'off',
       },
@@ -505,8 +508,6 @@ export async function POST(req: Request) {
       subscription
     );
 
-    // Save tracking information only.
-    // Do not activate the paid tier before payment succeeds.
     await adminDb.collection('users').doc(uid).set(
       {
         companyName,
@@ -528,7 +529,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // Handle subscriptions that do not require a payment intent.
     if (
       subscription.status === 'active' ||
       subscription.status === 'trialing'
