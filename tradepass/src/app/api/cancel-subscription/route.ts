@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { adminDb } from '@/lib/firebaseAdmin';
+import { FieldValue } from 'firebase-admin/firestore';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-10-28.endive' as any,
@@ -8,44 +9,90 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 export async function POST(req: Request) {
   try {
-    const { subscriptionId } = await req.json();
+    const {
+      uid,
+      subscriptionId: passedSubId,
+      cancelAtPeriodEnd = true,
+    } = await req.json();
 
-    if (!subscriptionId) {
+    if (!uid) {
       return NextResponse.json(
-        { error: 'Subscription ID is required.' },
+        { error: 'Missing required field: uid.' },
         { status: 400 }
       );
     }
 
-    // Tell Stripe to cancel subscription at the end of the current billing period
-    const subscription = await stripe.subscriptions.update(subscriptionId, {
-      cancel_at_period_end: true,
-    });
+    const userRef = adminDb.collection('users').doc(uid);
+    const userSnap = await userRef.get();
+    const userData = userSnap.data();
 
-    // Use Firebase Admin SDK to find and update user records securely
-    const usersRef = adminDb.collection('users');
-    const snapshot = await usersRef.where('subscriptionId', '==', subscriptionId).get();
+    const subscriptionId =
+      passedSubId || userData?.subscriptionId || null;
 
-    if (!snapshot.empty) {
-      const batch = adminDb.batch();
-      snapshot.docs.forEach((userDoc) => {
-        batch.update(userDoc.ref, {
-          cancelAtPeriodEnd: subscription.cancel_at_period_end,
-          updatedAt: new Date(),
-        });
-      });
-      await batch.commit();
+    if (!subscriptionId) {
+      return NextResponse.json(
+        { error: 'No subscription found for this user.' },
+        { status: 404 }
+      );
     }
+
+    let subscription: Stripe.Subscription;
+
+    try {
+      subscription = await stripe.subscriptions.update(
+        subscriptionId,
+        {
+          cancel_at_period_end: Boolean(cancelAtPeriodEnd),
+        }
+      );
+    } catch (err: any) {
+      if (err?.code === 'resource_missing') {
+        await userRef.set(
+          {
+            subscriptionStatus: 'canceled',
+            cancelAtPeriodEnd: false,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+
+        return NextResponse.json({
+          success: true,
+          alreadyCanceled: true,
+          cancelAtPeriodEnd: false,
+        });
+      }
+
+      throw err;
+    }
+
+    await userRef.set(
+      {
+        subscriptionId: subscription.id,
+        subscriptionStatus: subscription.status,
+        cancelAtPeriodEnd:
+          subscription.cancel_at_period_end ?? false,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
 
     return NextResponse.json({
       success: true,
-      subscriptionStatus: subscription.status,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      subscriptionId: subscription.id,
+      status: subscription.status,
+      cancelAtPeriodEnd:
+        subscription.cancel_at_period_end ?? false,
     });
   } catch (err: any) {
-    console.error('Cancel Subscription Error:', err);
+    console.error('Cancel Subscription API Error:', err);
+
     return NextResponse.json(
-      { error: err.message || 'Failed to cancel subscription' },
+      {
+        success: false,
+        error:
+          err.message || 'Failed to update subscription cancellation.',
+      },
       { status: 500 }
     );
   }

@@ -45,9 +45,7 @@ function getTierDetails(priceId: string) {
 async function getSubscriptionClientSecret(
   subscription: Stripe.Subscription
 ) {
-  let paymentIntent: any = null;
   let setupIntent: any = subscription.pending_setup_intent;
-
   const latestInvoice: any = subscription.latest_invoice;
 
   if (latestInvoice) {
@@ -55,11 +53,28 @@ async function getSubscriptionClientSecret(
 
     if (typeof latestInvoice === 'string') {
       invoice = await stripe.invoices.retrieve(latestInvoice, {
-        expand: ['payment_intent'],
+        expand: [
+          'confirmation_secret',
+          'payment_intent',
+          'payments.data.payment.payment_intent',
+        ],
       });
     }
 
-    paymentIntent = invoice?.payment_intent;
+    // Newer Stripe API versions (Basil / Clover / Dahlia / Endive)
+    if (invoice?.confirmation_secret?.client_secret) {
+      return {
+        clientSecret: invoice.confirmation_secret.client_secret,
+        intentType: 'payment',
+      };
+    }
+
+    // Invoice payments array / legacy payment_intent fallback
+    const firstPayment = invoice?.payments?.data?.[0];
+    let paymentIntent: any =
+      firstPayment?.payment?.payment_intent ||
+      invoice?.payment_intent ||
+      null;
 
     if (typeof paymentIntent === 'string') {
       paymentIntent = await stripe.paymentIntents.retrieve(
@@ -262,7 +277,9 @@ export async function POST(req: Request) {
         activeSubId,
         {
           expand: [
+            'latest_invoice.confirmation_secret',
             'latest_invoice.payment_intent',
+            'latest_invoice.payments.data.payment.payment_intent',
             'pending_setup_intent',
           ],
         }
@@ -417,7 +434,9 @@ export async function POST(req: Request) {
                 save_default_payment_method: 'on_subscription',
               },
               expand: [
+                'latest_invoice.confirmation_secret',
                 'latest_invoice.payment_intent',
+                'latest_invoice.payments.data.payment.payment_intent',
                 'pending_setup_intent',
               ],
             }
@@ -509,7 +528,9 @@ export async function POST(req: Request) {
         firebaseUID: uid,
       },
       expand: [
+        'latest_invoice.confirmation_secret',
         'latest_invoice.payment_intent',
+        'latest_invoice.payments.data.payment.payment_intent',
         'pending_setup_intent',
       ],
     });
