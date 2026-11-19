@@ -155,7 +155,7 @@ export async function POST(req: Request) {
     }
 
     // ==========================================
-    // FIND OR CREATE STRIPE CUSTOMER
+    // FIND OR CREATE STRIPE CUSTOMER (STRICT UID MATCH)
     // ==========================================
 
     const customers = await stripe.customers.list({
@@ -163,10 +163,9 @@ export async function POST(req: Request) {
       limit: 10,
     });
 
-    let customer =
-      customers.data.find(
-        (item) => item.metadata?.firebaseUID === uid
-      ) || customers.data[0];
+    let customer = customers.data.find(
+      (item) => item.metadata?.firebaseUID === uid
+    );
 
     if (!customer) {
       customer = await stripe.customers.create({
