@@ -492,6 +492,10 @@ export async function POST(req: Request) {
       payment_behavior: 'default_incomplete',
       collection_method: 'charge_automatically',
 
+      // Clear any potential default payment method residue
+      default_payment_method: '',
+
+      // Prevent saving the new card to the customer's profile
       payment_settings: {
         save_default_payment_method: 'off',
       },
@@ -506,7 +510,8 @@ export async function POST(req: Request) {
       ],
     });
 
-    const intent = await getSubscriptionClientSecret(
+    const intent
+      = await getSubscriptionClientSecret(
       subscription
     );
 
@@ -571,4 +576,3 @@ export async function POST(req: Request) {
     );
   }
 }
-  
