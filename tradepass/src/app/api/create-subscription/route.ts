@@ -119,6 +119,33 @@ async function saveSubscriptionTier(
 }
 
 // ==========================================
+// VOID ANY OPEN INVOICE BEFORE CANCELING
+// ==========================================
+
+async function cancelAndVoidSubscription(
+  subscription: Stripe.Subscription
+) {
+  const latestInvoice = subscription.latest_invoice;
+  const invoiceId =
+    typeof latestInvoice === 'string'
+      ? latestInvoice
+      : latestInvoice?.id;
+
+  if (invoiceId) {
+    try {
+      const invoice = await stripe.invoices.retrieve(invoiceId);
+      if (invoice.status === 'open') {
+        await stripe.invoices.voidInvoice(invoiceId);
+      }
+    } catch (err) {
+      console.warn('Could not void open invoice:', err);
+    }
+  }
+
+  await stripe.subscriptions.cancel(subscription.id);
+}
+
+// ==========================================
 // MAIN SUBSCRIPTION API
 // ==========================================
 
@@ -206,6 +233,7 @@ export async function POST(req: Request) {
           sub.status === 'active' ||
           sub.status === 'trialing' ||
           sub.status === 'past_due' ||
+          sub.status === 'unpaid' ||
           sub.status === 'incomplete'
       );
 
@@ -234,7 +262,6 @@ export async function POST(req: Request) {
           ? subscription.customer
           : subscription.customer.id;
 
-      // Verify subscription belongs to this customer.
       if (subscriptionCustomer !== customer.id) {
         return NextResponse.json(
           {
@@ -250,27 +277,39 @@ export async function POST(req: Request) {
       // ==========================================
 
       if (subscription.status === 'incomplete') {
-        console.log(
-          `Canceling previous incomplete subscription: ${subscription.id}`
-        );
-
-        await stripe.subscriptions.cancel(subscription.id);
-
+        await cancelAndVoidSubscription(subscription);
         activeSubId = null;
       }
 
       // ==========================================
-      // HANDLE PAST-DUE SUBSCRIPTION
+      // HANDLE PAST-DUE OR UNPAID SUBSCRIPTION
       // ==========================================
 
-      else if (subscription.status === 'past_due') {
-        return NextResponse.json(
-          {
-            error:
-              'Your previous subscription payment is past due. Please resolve the outstanding payment before changing tiers.',
-          },
-          { status: 409 }
-        );
+      else if (
+        subscription.status === 'past_due' ||
+        subscription.status === 'unpaid'
+      ) {
+        const currentItem = subscription.items.data[0];
+
+        // Resume payment on the open invoice if renewing the same plan
+        if (currentItem?.price.id === priceId) {
+          const intent = await getSubscriptionClientSecret(
+            subscription
+          );
+
+          if (intent.clientSecret) {
+            return NextResponse.json({
+              success: true,
+              subscriptionId: subscription.id,
+              clientSecret: intent.clientSecret,
+              intentType: intent.intentType,
+            });
+          }
+        }
+
+        // Otherwise void/cancel the past-due subscription and create a fresh one below
+        await cancelAndVoidSubscription(subscription);
+        activeSubId = null;
       }
 
       // ==========================================
@@ -281,6 +320,16 @@ export async function POST(req: Request) {
         subscription.status === 'active' ||
         subscription.status === 'trialing'
       ) {
+        // Clear any leftover pending update if the user backed out earlier
+        if (subscription.pending_update) {
+          subscription = await stripe.subscriptions.update(
+            subscription.id,
+            {
+              pending_update: null,
+            } as any
+          );
+        }
+
         const currentItem = subscription.items.data[0];
 
         if (!currentItem) {
@@ -336,7 +385,6 @@ export async function POST(req: Request) {
               }
             );
 
-          // Preserve your existing immediate downgrade behavior.
           await saveSubscriptionTier(
             uid,
             updatedSubscription,
@@ -351,7 +399,7 @@ export async function POST(req: Request) {
         }
 
         // ==========================================
-        // UPGRADE
+        // UPGRADE (SAFE PENDING UPDATE - NEVER LOCKS CURRENT TIER)
         // ==========================================
 
         const updatedSubscription =
@@ -364,19 +412,8 @@ export async function POST(req: Request) {
                   price: priceId,
                 },
               ],
-
-              // Force immediate invoice generation and proration calculation
               proration_behavior: 'always_invoice',
-              cancel_at_period_end: false,
-
-              // Force invoice creation and interactive payment intent
-              payment_behavior: 'default_incomplete',
-
-              // Prevent saving the new card to the customer's profile
-              payment_settings: {
-                save_default_payment_method: 'off',
-              },
-
+              payment_behavior: 'pending_if_incomplete',
               expand: [
                 'latest_invoice.payment_intent',
                 'pending_setup_intent',
@@ -388,10 +425,6 @@ export async function POST(req: Request) {
           updatedSubscription
         );
 
-        // ==========================================
-        // RETURN STRIPE PAYMENT DETAILS
-        // ==========================================
-
         if (intent.clientSecret) {
           return NextResponse.json({
             success: true,
@@ -401,14 +434,13 @@ export async function POST(req: Request) {
           });
         }
 
-        // Stripe might apply the update without requiring
-        // additional payment confirmation.
         const updatedItem = updatedSubscription.items.data.find(
           (item) => item.price.id === priceId
         );
 
         if (
           updatedItem &&
+          !updatedSubscription.pending_update &&
           (updatedSubscription.status === 'active' ||
             updatedSubscription.status === 'trialing')
         ) {
@@ -437,32 +469,16 @@ export async function POST(req: Request) {
       }
 
       // ==========================================
-      // HANDLE CANCELED SUBSCRIPTION
-      // ==========================================
-
-      else if (
-        subscription.status === 'canceled' ||
-        subscription.status === 'incomplete_expired'
-      ) {
-        activeSubId = null;
-      }
-
-      // ==========================================
-      // HANDLE OTHER SUBSCRIPTION STATUSES
+      // HANDLE CANCELED OR EXPIRED SUBSCRIPTION
       // ==========================================
 
       else {
-        return NextResponse.json(
-          {
-            error: `Your subscription currently has status "${subscription.status}". Please resolve this subscription before changing tiers.`,
-          },
-          { status: 409 }
-        );
+        activeSubId = null;
       }
     }
 
     // ==========================================
-    // SCENARIO B: BRAND-NEW SUBSCRIPTION
+    // SCENARIO B: BRAND-NEW OR RENEWED SUBSCRIPTION
     // ==========================================
 
     const existingIncomplete =
@@ -473,30 +489,24 @@ export async function POST(req: Request) {
       });
 
     for (const oldSubscription of existingIncomplete.data) {
-      await stripe.subscriptions.cancel(oldSubscription.id);
+      await cancelAndVoidSubscription(oldSubscription);
     }
 
     const subscription = await stripe.subscriptions.create({
       customer: customer.id,
-
       items: [
         {
           price: priceId,
         },
       ],
-
       payment_behavior: 'default_incomplete',
       collection_method: 'charge_automatically',
-
-      // Prevent saving the new card to the customer's profile
       payment_settings: {
         save_default_payment_method: 'off',
       },
-
       metadata: {
         firebaseUID: uid,
       },
-
       expand: [
         'latest_invoice.payment_intent',
         'pending_setup_intent',
@@ -554,7 +564,6 @@ export async function POST(req: Request) {
       },
       { status: 400 }
     );
-
   } catch (err: any) {
     console.error('Subscription API Error:', err);
 
