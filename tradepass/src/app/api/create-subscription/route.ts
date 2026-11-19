@@ -53,15 +53,11 @@ async function getSubscriptionClientSecret(
 
     if (typeof latestInvoice === 'string') {
       invoice = await stripe.invoices.retrieve(latestInvoice, {
-        expand: [
-          'confirmation_secret',
-          'payment_intent',
-          'payments.data.payment.payment_intent',
-        ],
+        expand: ['confirmation_secret', 'payment_intent'],
       });
     }
 
-    // Newer Stripe API versions (Basil / Clover / Dahlia / Endive)
+    // Modern Stripe API versions (2026-10-28.endive) expose client_secret via confirmation_secret
     if (invoice?.confirmation_secret?.client_secret) {
       return {
         clientSecret: invoice.confirmation_secret.client_secret,
@@ -69,12 +65,7 @@ async function getSubscriptionClientSecret(
       };
     }
 
-    // Invoice payments array / legacy payment_intent fallback
-    const firstPayment = invoice?.payments?.data?.[0];
-    let paymentIntent: any =
-      firstPayment?.payment?.payment_intent ||
-      invoice?.payment_intent ||
-      null;
+    let paymentIntent: any = invoice?.payment_intent || null;
 
     if (typeof paymentIntent === 'string') {
       paymentIntent = await stripe.paymentIntents.retrieve(
@@ -279,7 +270,6 @@ export async function POST(req: Request) {
           expand: [
             'latest_invoice.confirmation_secret',
             'latest_invoice.payment_intent',
-            'latest_invoice.payments.data.payment.payment_intent',
             'pending_setup_intent',
           ],
         }
@@ -436,7 +426,6 @@ export async function POST(req: Request) {
               expand: [
                 'latest_invoice.confirmation_secret',
                 'latest_invoice.payment_intent',
-                'latest_invoice.payments.data.payment.payment_intent',
                 'pending_setup_intent',
               ],
             }
@@ -530,7 +519,6 @@ export async function POST(req: Request) {
       expand: [
         'latest_invoice.confirmation_secret',
         'latest_invoice.payment_intent',
-        'latest_invoice.payments.data.payment.payment_intent',
         'pending_setup_intent',
       ],
     });
