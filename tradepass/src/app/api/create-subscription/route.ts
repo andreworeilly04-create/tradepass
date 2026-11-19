@@ -221,6 +221,17 @@ export async function POST(req: Request) {
 
     let activeSubId: string | null = subscriptionId || null;
 
+    if (activeSubId) {
+      try {
+        await stripe.subscriptions.retrieve(activeSubId);
+      } catch (err: any) {
+        console.warn(
+          `Passed subscriptionId "${activeSubId}" not found, falling back to customer lookup.`
+        );
+        activeSubId = null;
+      }
+    }
+
     if (!activeSubId) {
       const existingSubs = await stripe.subscriptions.list({
         customer: customer.id,
@@ -247,7 +258,7 @@ export async function POST(req: Request) {
     // ==========================================
 
     if (activeSubId) {
-      let subscription = await stripe.subscriptions.retrieve(
+      const subscription = await stripe.subscriptions.retrieve(
         activeSubId,
         {
           expand: [
@@ -291,7 +302,6 @@ export async function POST(req: Request) {
       ) {
         const currentItem = subscription.items.data[0];
 
-        // Resume payment on the open invoice if renewing the same plan
         if (currentItem?.price.id === priceId) {
           const intent = await getSubscriptionClientSecret(
             subscription
@@ -307,7 +317,6 @@ export async function POST(req: Request) {
           }
         }
 
-        // Otherwise void/cancel the past-due subscription and create a fresh one below
         await cancelAndVoidSubscription(subscription);
         activeSubId = null;
       }
@@ -320,16 +329,6 @@ export async function POST(req: Request) {
         subscription.status === 'active' ||
         subscription.status === 'trialing'
       ) {
-        // Clear any leftover pending update if the user backed out earlier
-        if (subscription.pending_update) {
-          subscription = await stripe.subscriptions.update(
-            subscription.id,
-            {
-              pending_update: null,
-            } as any
-          );
-        }
-
         const currentItem = subscription.items.data[0];
 
         if (!currentItem) {
@@ -399,7 +398,7 @@ export async function POST(req: Request) {
         }
 
         // ==========================================
-        // UPGRADE (SAFE PENDING UPDATE - NEVER LOCKS CURRENT TIER)
+        // UPGRADE (SAVE PAYMENT METHOD, NO ALWAYS_INVOICE)
         // ==========================================
 
         const updatedSubscription =
@@ -412,8 +411,11 @@ export async function POST(req: Request) {
                   price: priceId,
                 },
               ],
-              proration_behavior: 'always_invoice',
-              payment_behavior: 'pending_if_incomplete',
+              cancel_at_period_end: false,
+              payment_behavior: 'default_incomplete',
+              payment_settings: {
+                save_default_payment_method: 'on_subscription',
+              },
               expand: [
                 'latest_invoice.payment_intent',
                 'pending_setup_intent',
@@ -440,7 +442,6 @@ export async function POST(req: Request) {
 
         if (
           updatedItem &&
-          !updatedSubscription.pending_update &&
           (updatedSubscription.status === 'active' ||
             updatedSubscription.status === 'trialing')
         ) {
@@ -502,7 +503,7 @@ export async function POST(req: Request) {
       payment_behavior: 'default_incomplete',
       collection_method: 'charge_automatically',
       payment_settings: {
-        save_default_payment_method: 'off',
+        save_default_payment_method: 'on_subscription',
       },
       metadata: {
         firebaseUID: uid,
