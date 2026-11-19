@@ -569,3 +569,577 @@ export async function POST(req: Request) {
     );
   }
 }
+              ],
+            }
+          );
+
+        const intent = await getSubscriptionClientSecret(
+          updatedSubscription
+        );
+
+        // ==========================================
+        // RETURN STRIPE PAYMENT DETAILS
+        // ==========================================
+
+        if (intent.clientSecret) {
+          return NextResponse.json({
+            success: true,
+            subscriptionId: updatedSubscription.id,
+            clientSecret: intent.clientSecret,
+            intentType: intent.intentType,
+          });
+        }
+
+        // Stripe might apply the update without requiring
+        // additional payment confirmation.
+        const updatedItem = updatedSubscription.items.data.find(
+          (item) => item.price.id === priceId
+        );
+
+        if (
+          updatedItem &&
+          (updatedSubscription.status === 'active' ||
+            updatedSubscription.status === 'trialing')
+        ) {
+          await saveSubscriptionTier(
+            uid,
+            updatedSubscription,
+            newTier
+          );
+
+          return NextResponse.json({
+            success: true,
+            isNoPaymentRequired: true,
+            subscriptionId: updatedSubscription.id,
+          });
+        }
+
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'Stripe did not generate a payment confirmation. Please check the subscription invoice and try again.',
+            subscriptionId: updatedSubscription.id,
+          },
+          { status: 400 }
+        );
+      }
+
+      // ==========================================
+      // HANDLE CANCELED SUBSCRIPTION
+      // ==========================================
+
+      else if (
+        subscription.status === 'canceled' ||
+        subscription.status === 'incomplete_expired'
+      ) {
+        activeSubId = null;
+      }
+
+      // ==========================================
+      // HANDLE OTHER SUBSCRIPTION STATUSES
+      // ==========================================
+
+      else {
+        return NextResponse.json(
+          {
+            error: `Your subscription currently has status "${subscription.status}". Please resolve this subscription before changing tiers.`,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
+    // ==========================================
+    // SCENARIO B: BRAND-NEW SUBSCRIPTION
+    // ==========================================
+
+    const existingIncomplete =
+      await stripe.subscriptions.list({
+        customer: customer.id,
+        status: 'incomplete',
+        limit: 20,
+      });
+
+    for (const oldSubscription of existingIncomplete.data) {
+      await stripe.subscriptions.cancel(oldSubscription.id);
+    }
+
+    const subscription = await stripe.subscriptions.create({
+      customer: customer.id,
+
+      items: [
+        {
+          price: priceId,
+        },
+      ],
+
+      payment_behavior: 'default_incomplete',
+      collection_method: 'charge_automatically',
+
+      // Prevent saving the new card to the customer's profile
+      payment_settings: {
+        save_default_payment_method: 'off',
+      },
+
+      metadata: {
+        firebaseUID: uid,
+      },
+
+      expand: [
+        'latest_invoice.payment_intent',
+        'pending_setup_intent',
+      ],
+    });
+
+    const intent = await getSubscriptionClientSecret(
+      subscription
+    );
+
+    await adminDb.collection('users').doc(uid).set(
+      {
+        companyName,
+        email,
+        subscriptionId: subscription.id,
+        cancelAtPeriodEnd: false,
+        subscriptionStatus: subscription.status,
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    if (intent.clientSecret) {
+      return NextResponse.json({
+        success: true,
+        subscriptionId: subscription.id,
+        clientSecret: intent.clientSecret,
+        intentType: intent.intentType,
+      });
+    }
+
+    if (
+      subscription.status === 'active' ||
+      subscription.status === 'trialing'
+    ) {
+      await saveSubscriptionTier(
+        uid,
+        subscription,
+        newTier
+      );
+
+      return NextResponse.json({
+        success: true,
+        isNoPaymentRequired: true,
+        subscriptionId: subscription.id,
+      });
+    }
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'Stripe did not generate a payment confirmation. Please try again or contact support.',
+        subscriptionId: subscription.id,
+      },
+      { status: 400 }
+    );
+
+  } catch (err: any) {
+    console.error('Subscription API Error:', err);
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          err.message || 'Failed to process subscription.',
+      },
+      { status: 500 }
+    );
+  }
+}
+              ],
+            }
+          );
+
+        const intent = await getSubscriptionClientSecret(
+          updatedSubscription
+        );
+
+        // ==========================================
+        // RETURN STRIPE PAYMENT DETAILS
+        // ==========================================
+
+        if (intent.clientSecret) {
+          return NextResponse.json({
+            success: true,
+            subscriptionId: updatedSubscription.id,
+            clientSecret: intent.clientSecret,
+            intentType: intent.intentType,
+          });
+        }
+
+        // Stripe might apply the update without requiring
+        // additional payment confirmation.
+        const updatedItem = updatedSubscription.items.data.find(
+          (item) => item.price.id === priceId
+        );
+
+        if (
+          updatedItem &&
+          (updatedSubscription.status === 'active' ||
+            updatedSubscription.status === 'trialing')
+        ) {
+          await saveSubscriptionTier(
+            uid,
+            updatedSubscription,
+            newTier
+          );
+
+          return NextResponse.json({
+            success: true,
+            isNoPaymentRequired: true,
+            subscriptionId: updatedSubscription.id,
+          });
+        }
+
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'Stripe did not generate a payment confirmation. Please check the subscription invoice and try again.',
+            subscriptionId: updatedSubscription.id,
+          },
+          { status: 400 }
+        );
+      }
+
+      // ==========================================
+      // HANDLE CANCELED SUBSCRIPTION
+      // ==========================================
+
+      else if (
+        subscription.status === 'canceled' ||
+        subscription.status === 'incomplete_expired'
+      ) {
+        activeSubId = null;
+      }
+
+      // ==========================================
+      // HANDLE OTHER SUBSCRIPTION STATUSES
+      // ==========================================
+
+      else {
+        return NextResponse.json(
+          {
+            error: `Your subscription currently has status "${subscription.status}". Please resolve this subscription before changing tiers.`,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
+    // ==========================================
+    // SCENARIO B: BRAND-NEW SUBSCRIPTION
+    // ==========================================
+
+    const existingIncomplete =
+      await stripe.subscriptions.list({
+        customer: customer.id,
+        status: 'incomplete',
+        limit: 20,
+      });
+
+    for (const oldSubscription of existingIncomplete.data) {
+      await stripe.subscriptions.cancel(oldSubscription.id);
+    }
+
+    const subscription = await stripe.subscriptions.create({
+      customer: customer.id,
+
+      items: [
+        {
+          price: priceId,
+        },
+      ],
+
+      payment_behavior: 'default_incomplete',
+      collection_method: 'charge_automatically',
+
+      // Prevent saving the new card to the customer's profile
+      payment_settings: {
+        save_default_payment_method: 'off',
+      },
+
+      metadata: {
+        firebaseUID: uid,
+      },
+
+      expand: [
+        'latest_invoice.payment_intent',
+        'pending_setup_intent',
+      ],
+    });
+
+    const intent = await getSubscriptionClientSecret(
+      subscription
+    );
+
+    await adminDb.collection('users').doc(uid).set(
+      {
+        companyName,
+        email,
+        subscriptionId: subscription.id,
+        cancelAtPeriodEnd: false,
+        subscriptionStatus: subscription.status,
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    if (intent.clientSecret) {
+      return NextResponse.json({
+        success: true,
+        subscriptionId: subscription.id,
+        clientSecret: intent.clientSecret,
+        intentType: intent.intentType,
+      });
+    }
+
+    if (
+      subscription.status === 'active' ||
+      subscription.status === 'trialing'
+    ) {
+      await saveSubscriptionTier(
+        uid,
+        subscription,
+        newTier
+      );
+
+      return NextResponse.json({
+        success: true,
+        isNoPaymentRequired: true,
+        subscriptionId: subscription.id,
+      });
+    }
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'Stripe did not generate a payment confirmation. Please try again or contact support.',
+        subscriptionId: subscription.id,
+      },
+      { status: 400 }
+    );
+
+  } catch (err: any) {
+    console.error('Subscription API Error:', err);
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          err.message || 'Failed to process subscription.',
+      },
+      { status: 500 }
+    );
+  }
+}
+off',
+              },
+
+              expand: [
+                'latest_invoice.payment_intent',
+                'pending_setup_intent',
+              ],
+            }
+          );
+
+        const intent = await getSubscriptionClientSecret(
+          updatedSubscription
+        );
+
+        // ==========================================
+        // RETURN STRIPE PAYMENT DETAILS
+        // ==========================================
+
+        if (intent.clientSecret) {
+          return NextResponse.json({
+            success: true,
+            subscriptionId: updatedSubscription.id,
+            clientSecret: intent.clientSecret,
+            intentType: intent.intentType,
+          });
+        }
+
+        // Stripe might apply the update without requiring
+        // additional payment confirmation.
+        const updatedItem = updatedSubscription.items.data.find(
+          (item) => item.price.id === priceId
+        );
+
+        if (
+          updatedItem &&
+          (updatedSubscription.status === 'active' ||
+            updatedSubscription.status === 'trialing')
+        ) {
+          await saveSubscriptionTier(
+            uid,
+            updatedSubscription,
+            newTier
+          );
+
+          return NextResponse.json({
+            success: true,
+            isNoPaymentRequired: true,
+            subscriptionId: updatedSubscription.id,
+          });
+        }
+
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'Stripe did not generate a payment confirmation. Please check the subscription invoice and try again.',
+            subscriptionId: updatedSubscription.id,
+          },
+          { status: 400 }
+        );
+      }
+
+      // ==========================================
+      // HANDLE CANCELED SUBSCRIPTION
+      // ==========================================
+
+      else if (
+        subscription.status === 'canceled' ||
+        subscription.status === 'incomplete_expired'
+      ) {
+        activeSubId = null;
+      }
+
+      // ==========================================
+      // HANDLE OTHER SUBSCRIPTION STATUSES
+      // ==========================================
+
+      else {
+        return NextResponse.json(
+          {
+            error: `Your subscription currently has status "${subscription.status}". Please resolve this subscription before changing tiers.`,
+          },
+          { status: 409 }
+        );
+      }
+    }
+
+    // ==========================================
+    // SCENARIO B: BRAND-NEW SUBSCRIPTION
+    // ==========================================
+
+    const existingIncomplete =
+      await stripe.subscriptions.list({
+        customer: customer.id,
+        status: 'incomplete',
+        limit: 20,
+      });
+
+    for (const oldSubscription of existingIncomplete.data) {
+      await stripe.subscriptions.cancel(oldSubscription.id);
+    }
+
+    const subscription = await stripe.subscriptions.create({
+      customer: customer.id,
+
+      items: [
+        {
+          price: priceId,
+        },
+      ],
+
+      payment_behavior: 'default_incomplete',
+      collection_method: 'charge_automatically',
+
+      // Clear any potential default payment method residue
+      default_payment_method: '',
+
+      // Prevent saving the new card to the customer's profile
+      payment_settings: {
+        save_default_payment_method: 'off',
+      },
+
+      metadata: {
+        firebaseUID: uid,
+      },
+
+      expand: [
+        'latest_invoice.payment_intent',
+        'pending_setup_intent',
+      ],
+    });
+
+    const intent
+      = await getSubscriptionClientSecret(
+      subscription
+    );
+
+    await adminDb.collection('users').doc(uid).set(
+      {
+        companyName,
+        email,
+        subscriptionId: subscription.id,
+        cancelAtPeriodEnd: false,
+        subscriptionStatus: subscription.status,
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+
+    if (intent.clientSecret) {
+      return NextResponse.json({
+        success: true,
+        subscriptionId: subscription.id,
+        clientSecret: intent.clientSecret,
+        intentType: intent.intentType,
+      });
+    }
+
+    if (
+      subscription.status === 'active' ||
+      subscription.status === 'trialing'
+    ) {
+      await saveSubscriptionTier(
+        uid,
+        subscription,
+        newTier
+      );
+
+      return NextResponse.json({
+        success: true,
+        isNoPaymentRequired: true,
+        subscriptionId: subscription.id,
+      });
+    }
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          'Stripe did not generate a payment confirmation. Please try again or contact support.',
+        subscriptionId: subscription.id,
+      },
+      { status: 400 }
+    );
+
+  } catch (err: any) {
+    console.error('Subscription API Error:', err);
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          err.message || 'Failed to process subscription.',
+      },
+      { status: 500 }
+    );
+  }
+}
