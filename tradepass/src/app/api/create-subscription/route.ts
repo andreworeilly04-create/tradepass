@@ -416,6 +416,7 @@ export async function POST(req: Request) {
             );
           }
 
+
           // ==========================================
           // SAME TIER: SYNC FIRESTORE & RETURN NO-CHANGE
           // ==========================================
@@ -459,7 +460,7 @@ export async function POST(req: Request) {
           }
 
           // ==========================================
-          // UPGRADE (IMMEDIATE INVOICE + PAYMENT ELEMENT)
+          // UPGRADE (PENDING_IF_INCOMPLETE KEEPS CURRENT PLAN ACTIVE)
           // ==========================================
 
           const updatedSubscription = await stripe.subscriptions.update(
@@ -473,7 +474,7 @@ export async function POST(req: Request) {
               ],
               proration_behavior: 'always_invoice',
               cancel_at_period_end: false,
-              payment_behavior: 'default_incomplete',
+              payment_behavior: 'pending_if_incomplete',
               payment_settings: {
                 save_default_payment_method: 'on_subscription',
               },

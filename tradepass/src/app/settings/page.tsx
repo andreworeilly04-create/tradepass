@@ -8,7 +8,6 @@ import {
   CheckCircle2, 
   AlertTriangle, 
   Save, 
-  Lock,
   ArrowLeft,
   RefreshCw,
   XCircle,
@@ -159,7 +158,9 @@ export default function SettingsPage() {
 
   const subscriptionStatus = profile?.subscriptionStatus || 'active';
   const cancelAtPeriodEnd = profile?.cancelAtPeriodEnd || false;
-  const isExpired = subscriptionStatus === 'expired' || subscriptionStatus === 'canceled' || subscriptionStatus === 'past_due';
+
+  const isPaymentPending = subscriptionStatus === 'past_due' || subscriptionStatus === 'incomplete';
+  const isExpired = subscriptionStatus === 'expired' || subscriptionStatus === 'canceled';
 
   if (loading) {
     return (
@@ -219,6 +220,8 @@ export default function SettingsPage() {
                 className={`inline-flex items-center space-x-1.5 border text-xs px-3 py-1 rounded-full font-semibold mb-3 ${
                   isExpired
                     ? 'bg-rose-950/80 text-rose-400 border-rose-800/60'
+                    : isPaymentPending
+                    ? 'bg-amber-950/80 text-amber-400 border-amber-800/60'
                     : cancelAtPeriodEnd
                     ? 'bg-amber-950/80 text-amber-400 border-amber-800/60'
                     : 'bg-blue-950 text-blue-400 border-blue-800/60'
@@ -226,14 +229,16 @@ export default function SettingsPage() {
               >
                 {isExpired ? (
                   <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                ) : cancelAtPeriodEnd ? (
+                ) : isPaymentPending || cancelAtPeriodEnd ? (
                   <XCircle className="w-3.5 h-3.5 text-amber-400" />
                 ) : (
                   <CheckCircle2 className="w-3.5 h-3.5" />
                 )}
                 <span>
                   {isExpired 
-                    ? 'Your plan has expired' 
+                    ? 'Subscription Inactive' 
+                    : isPaymentPending
+                    ? 'Checkout / Payment Pending'
                     : cancelAtPeriodEnd 
                     ? 'Subscription Canceling (Active until end of period)' 
                     : 'Active Subscription'}
@@ -245,7 +250,9 @@ export default function SettingsPage() {
               </h2>
               <p className="text-sm text-slate-400 mt-1">
                 {isExpired 
-                  ? 'Your account features and public GC links are temporarily locked. Renew to resume full access.' 
+                  ? 'Your subscription is inactive. Select a plan to activate or renew access.' 
+                  : isPaymentPending
+                  ? 'Your previous checkout was not completed. Continue checkout or choose a plan tier to finish.'
                   : cancelAtPeriodEnd
                   ? 'Your subscription will not auto-renew at the end of the current billing cycle.'
                   : `Covers up to ${profile?.maxWorkers === 999 ? 'Unlimited' : profile?.maxWorkers || 10} active workers.`}
@@ -253,7 +260,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-              {cancelAtPeriodEnd ? (
+              {cancelAtPeriodEnd && !isExpired ? (
                 <button
                   onClick={() => handleToggleSubscription('resume')}
                   disabled={updatingSubscription}
@@ -262,7 +269,7 @@ export default function SettingsPage() {
                   <RefreshCw className={`w-3.5 h-3.5 ${updatingSubscription ? 'animate-spin' : ''}`} />
                   <span>{updatingSubscription ? 'Resuming...' : 'Resume Subscription'}</span>
                 </button>
-              ) : !isExpired ? (
+              ) : !isExpired && !isPaymentPending ? (
                 <button
                   onClick={() => handleToggleSubscription('cancel')}
                   disabled={updatingSubscription}
@@ -274,9 +281,9 @@ export default function SettingsPage() {
               ) : (
                 <button 
                   onClick={() => router.push('/signup')}
-                  className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-lg shadow-rose-600/20 cursor-pointer"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-lg shadow-emerald-600/20 cursor-pointer"
                 >
-                  Renew Plan Now
+                  {isPaymentPending ? 'Complete Checkout' : 'Renew Plan'}
                 </button>
               )}
 
