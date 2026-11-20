@@ -62,7 +62,6 @@ async function getSubscriptionClientSecret(
       });
     }
 
-    // Stripe API 2026-10-28.endive exposes client_secret via confirmation_secret
     if (invoice?.confirmation_secret?.client_secret) {
       return {
         clientSecret: invoice.confirmation_secret.client_secret,
@@ -106,8 +105,7 @@ async function saveSubscriptionTier(
       maxWorkers: tier.maxWorkers,
       subscriptionId: subscription.id,
       subscriptionStatus: subscription.status,
-      cancelAtPeriodEnd:
-        subscription.cancel_at_period_end ?? false,
+      cancelAtPeriodEnd: subscription.cancel_at_period_end ?? false,
       updatedAt: new Date(),
     },
     { merge: true }
@@ -138,7 +136,16 @@ async function cancelAndVoidSubscription(
     }
   }
 
-  await stripe.subscriptions.cancel(subscription.id);
+  try {
+    await stripe.subscriptions.cancel(subscription.id);
+  } catch (err: any) {
+    if (err?.code !== 'resource_missing') {
+      throw err;
+    }
+    console.warn(
+      `Subscription ${subscription.id} already missing during cancel.`
+    );
+  }
 }
 
 // ==========================================
@@ -258,133 +265,177 @@ export async function POST(req: Request) {
     // ==========================================
 
     if (activeSubId) {
-      const subscription = await stripe.subscriptions.retrieve(
-        activeSubId,
-        {
+      let subscription: Stripe.Subscription | null = null;
+
+      try {
+        subscription = await stripe.subscriptions.retrieve(activeSubId, {
           expand: [...SUBSCRIPTION_EXPANDS],
-        }
-      );
-
-      const subscriptionCustomer =
-        typeof subscription.customer === 'string'
-          ? subscription.customer
-          : subscription.customer.id;
-
-      if (subscriptionCustomer !== customer.id) {
-        return NextResponse.json(
-          {
-            error:
-              'Subscription does not belong to this customer.',
-          },
-          { status: 403 }
+        });
+      } catch (err: any) {
+        console.warn(
+          `Subscription "${activeSubId}" could not be retrieved during scenario handling, falling back to new subscription.`
+        );
+        activeSubId = null;
+        await adminDb.collection('users').doc(uid).set(
+          { subscriptionId: null, updatedAt: new Date() },
+          { merge: true }
         );
       }
 
-      // ==========================================
-      // HANDLE PREVIOUS INCOMPLETE SUBSCRIPTION
-      // ==========================================
+      if (subscription && activeSubId) {
+        const subscriptionCustomer =
+          typeof subscription.customer === 'string'
+            ? subscription.customer
+            : subscription.customer.id;
 
-      if (subscription.status === 'incomplete') {
-        const currentItem = subscription.items.data[0];
-
-        if (currentItem?.price.id === priceId) {
-          const intent = await getSubscriptionClientSecret(
-            subscription
-          );
-
-          if (intent.clientSecret) {
-            return NextResponse.json({
-              success: true,
-              subscriptionId: subscription.id,
-              clientSecret: intent.clientSecret,
-              intentType: intent.intentType,
-            });
-          }
-        }
-
-        await cancelAndVoidSubscription(subscription);
-        activeSubId = null;
-      }
-
-      // ==========================================
-      // HANDLE PAST-DUE OR UNPAID SUBSCRIPTION
-      // ==========================================
-
-      else if (
-        subscription.status === 'past_due' ||
-        subscription.status === 'unpaid'
-      ) {
-        const currentItem = subscription.items.data[0];
-
-        if (currentItem?.price.id === priceId) {
-          const intent = await getSubscriptionClientSecret(
-            subscription
-          );
-
-          if (intent.clientSecret) {
-            return NextResponse.json({
-              success: true,
-              subscriptionId: subscription.id,
-              clientSecret: intent.clientSecret,
-              intentType: intent.intentType,
-            });
-          }
-        }
-
-        await cancelAndVoidSubscription(subscription);
-        activeSubId = null;
-      }
-
-      // ==========================================
-      // HANDLE ACTIVE OR TRIALING SUBSCRIPTION
-      // ==========================================
-
-      else if (
-        subscription.status === 'active' ||
-        subscription.status === 'trialing'
-      ) {
-        const currentItem = subscription.items.data[0];
-
-        if (!currentItem) {
-          return NextResponse.json(
-            { error: 'No subscription item was found.' },
-            { status: 400 }
-          );
-        }
-
-        const currentTier = getTierDetails(
-          currentItem.price.id
-        );
-
-        if (!currentTier) {
+        if (subscriptionCustomer !== customer.id) {
           return NextResponse.json(
             {
-              error:
-                'The current subscription tier could not be identified.',
+              error: 'Subscription does not belong to this customer.',
             },
-            { status: 400 }
+            { status: 403 }
           );
         }
 
         // ==========================================
-        // SAME TIER: NO PAYMENT REQUIRED
+        // HANDLE PREVIOUS INCOMPLETE SUBSCRIPTION
         // ==========================================
 
-        if (currentItem.price.id === priceId) {
-          return NextResponse.json({
-            success: true,
-            isNoChange: true,
-            subscriptionId: subscription.id,
-          });
+        if (subscription.status === 'incomplete') {
+          const currentItem = subscription.items.data[0];
+
+          if (currentItem?.price.id === priceId) {
+            const intent = await getSubscriptionClientSecret(subscription);
+
+            if (intent.clientSecret) {
+              return NextResponse.json({
+                success: true,
+                subscriptionId: subscription.id,
+                clientSecret: intent.clientSecret,
+                intentType: intent.intentType,
+              });
+            }
+          }
+
+          if (currentItem) {
+            try {
+              const updatedIncomplete = await stripe.subscriptions.update(
+                subscription.id,
+                {
+                  items: [
+                    {
+                      id: currentItem.id,
+                      price: priceId,
+                    },
+                  ],
+                  payment_behavior: 'default_incomplete',
+                  payment_settings: {
+                    save_default_payment_method: 'on_subscription',
+                  },
+                  expand: [...SUBSCRIPTION_EXPANDS],
+                }
+              );
+
+              const intent = await getSubscriptionClientSecret(
+                updatedIncomplete
+              );
+
+              if (intent.clientSecret) {
+                return NextResponse.json({
+                  success: true,
+                  subscriptionId: updatedIncomplete.id,
+                  clientSecret: intent.clientSecret,
+                  intentType: intent.intentType,
+                });
+              }
+            } catch (err) {
+              console.warn(
+                'Could not update incomplete subscription in-place, recreating:',
+                err
+              );
+            }
+          }
+
+          await cancelAndVoidSubscription(subscription);
+          activeSubId = null;
         }
 
         // ==========================================
-        // DOWNGRADE
+        // HANDLE PAST-DUE OR UNPAID SUBSCRIPTION
         // ==========================================
 
-        if (newTier.rank < currentTier.rank) {
-          const updatedSubscription =
-            await stripe.subscriptions.update(
+        else if (
+          subscription.status === 'past_due' ||
+          subscription.status === 'unpaid'
+        ) {
+          const currentItem = subscription.items.data[0];
+
+          if (currentItem?.price.id === priceId) {
+            const intent = await getSubscriptionClientSecret(subscription);
+
+            if (intent.clientSecret) {
+              return NextResponse.json({
+                success: true,
+                subscriptionId: subscription.id,
+                clientSecret: intent.clientSecret,
+                intentType: intent.intentType,
+              });
+            }
+          }
+
+          await cancelAndVoidSubscription(subscription);
+          activeSubId = null;
+        }
+
+        // ==========================================
+        // HANDLE ACTIVE OR TRIALING SUBSCRIPTION
+        // ==========================================
+
+        else if (
+          subscription.status === 'active' ||
+          subscription.status === 'trialing'
+        ) {
+          const currentItem = subscription.items.data[0];
+
+          if (!currentItem) {
+            return NextResponse.json(
+              { error: 'No subscription item was found.' },
+              { status: 400 }
+            );
+          }
+
+          const currentTier = getTierDetails(currentItem.price.id);
+
+          if (!currentTier) {
+            return NextResponse.json(
+              {
+                error:
+                  'The current subscription tier could not be identified.',
+              },
+              { status: 400 }
+            );
+          }
+
+          // ==========================================
+          // SAME TIER: SYNC FIRESTORE & RETURN NO-CHANGE
+          // ==========================================
+
+          if (currentItem.price.id === priceId) {
+            await saveSubscriptionTier(uid, subscription, newTier);
+
+            return NextResponse.json({
+              success: true,
+              isNoChange: true,
+              subscriptionId: subscription.id,
+            });
+          }
+
+          // ==========================================
+          // DOWNGRADE
+          // ==========================================
+
+          if (newTier.rank < currentTier.rank) {
+            const updatedSubscription = await stripe.subscriptions.update(
               subscription.id,
               {
                 items: [
@@ -398,25 +449,20 @@ export async function POST(req: Request) {
               }
             );
 
-          await saveSubscriptionTier(
-            uid,
-            updatedSubscription,
-            newTier
-          );
+            await saveSubscriptionTier(uid, updatedSubscription, newTier);
 
-          return NextResponse.json({
-            success: true,
-            isDowngrade: true,
-            subscriptionId: updatedSubscription.id,
-          });
-        }
+            return NextResponse.json({
+              success: true,
+              isDowngrade: true,
+              subscriptionId: updatedSubscription.id,
+            });
+          }
 
-        // ==========================================
-        // UPGRADE (IMMEDIATE INVOICE + PAYMENT ELEMENT)
-        // ==========================================
+          // ==========================================
+          // UPGRADE (IMMEDIATE INVOICE + PAYMENT ELEMENT)
+          // ==========================================
 
-        const updatedSubscription =
-          await stripe.subscriptions.update(
+          const updatedSubscription = await stripe.subscriptions.update(
             subscription.id,
             {
               items: [
@@ -435,58 +481,55 @@ export async function POST(req: Request) {
             }
           );
 
-        const intent = await getSubscriptionClientSecret(
-          updatedSubscription
-        );
-
-        if (intent.clientSecret) {
-          return NextResponse.json({
-            success: true,
-            subscriptionId: updatedSubscription.id,
-            clientSecret: intent.clientSecret,
-            intentType: intent.intentType,
-          });
-        }
-
-        const updatedItem = updatedSubscription.items.data.find(
-          (item) => item.price.id === priceId
-        );
-
-        if (
-          updatedItem &&
-          (updatedSubscription.status === 'active' ||
-            updatedSubscription.status === 'trialing')
-        ) {
-          await saveSubscriptionTier(
-            uid,
-            updatedSubscription,
-            newTier
+          const intent = await getSubscriptionClientSecret(
+            updatedSubscription
           );
 
-          return NextResponse.json({
-            success: true,
-            isNoPaymentRequired: true,
-            subscriptionId: updatedSubscription.id,
-          });
+          if (intent.clientSecret) {
+            return NextResponse.json({
+              success: true,
+              subscriptionId: updatedSubscription.id,
+              clientSecret: intent.clientSecret,
+              intentType: intent.intentType,
+            });
+          }
+
+          const updatedItem = updatedSubscription.items.data.find(
+            (item) => item.price.id === priceId
+          );
+
+          if (
+            updatedItem &&
+            (updatedSubscription.status === 'active' ||
+              updatedSubscription.status === 'trialing')
+          ) {
+            await saveSubscriptionTier(uid, updatedSubscription, newTier);
+
+            return NextResponse.json({
+              success: true,
+              isNoPaymentRequired: true,
+              subscriptionId: updatedSubscription.id,
+            });
+          }
+
+          return NextResponse.json(
+            {
+              success: false,
+              error:
+                'Stripe did not generate a payment confirmation. Please check the subscription invoice and try again.',
+              subscriptionId: updatedSubscription.id,
+            },
+            { status: 400 }
+          );
         }
 
-        return NextResponse.json(
-          {
-            success: false,
-            error:
-              'Stripe did not generate a payment confirmation. Please check the subscription invoice and try again.',
-            subscriptionId: updatedSubscription.id,
-          },
-          { status: 400 }
-        );
-      }
+        // ==========================================
+        // HANDLE CANCELED OR EXPIRED SUBSCRIPTION
+        // ==========================================
 
-      // ==========================================
-      // HANDLE CANCELED OR EXPIRED SUBSCRIPTION
-      // ==========================================
-
-      else {
-        activeSubId = null;
+        else {
+          activeSubId = null;
+        }
       }
     }
 
@@ -494,12 +537,11 @@ export async function POST(req: Request) {
     // SCENARIO B: BRAND-NEW OR RENEWED SUBSCRIPTION
     // ==========================================
 
-    const existingIncomplete =
-      await stripe.subscriptions.list({
-        customer: customer.id,
-        status: 'incomplete',
-        limit: 20,
-      });
+    const existingIncomplete = await stripe.subscriptions.list({
+      customer: customer.id,
+      status: 'incomplete',
+      limit: 20,
+    });
 
     for (const oldSubscription of existingIncomplete.data) {
       await cancelAndVoidSubscription(oldSubscription);
@@ -523,9 +565,7 @@ export async function POST(req: Request) {
       expand: [...SUBSCRIPTION_EXPANDS],
     });
 
-    const intent = await getSubscriptionClientSecret(
-      subscription
-    );
+    const intent = await getSubscriptionClientSecret(subscription);
 
     await adminDb.collection('users').doc(uid).set(
       {
@@ -552,11 +592,7 @@ export async function POST(req: Request) {
       subscription.status === 'active' ||
       subscription.status === 'trialing'
     ) {
-      await saveSubscriptionTier(
-        uid,
-        subscription,
-        newTier
-      );
+      await saveSubscriptionTier(uid, subscription, newTier);
 
       return NextResponse.json({
         success: true,
@@ -580,8 +616,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         success: false,
-        error:
-          err.message || 'Failed to process subscription.',
+        error: err.message || 'Failed to process subscription.',
       },
       { status: 500 }
     );

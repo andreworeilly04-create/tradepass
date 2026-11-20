@@ -12,13 +12,14 @@ import { auth, db } from '@/lib/firebase';
 import { Check, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import CheckoutForm from '@/components/CheckoutForm';
 
-const stripePromise = loadStripe(
-  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
-);
+const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+const stripePromise = stripePublishableKey
+  ? loadStripe(stripePublishableKey)
+  : null;
 
 const TIERS = [
   {
-    id: process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID,
+    id: process.env.NEXT_PUBLIC_STRIPE_STANDARD_PRICE_ID || '',
     name: 'Standard Crew',
     price: '$49',
     workers: 'Up to 10 workers',
@@ -30,7 +31,7 @@ const TIERS = [
     ],
   },
   {
-    id: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID,
+    id: process.env.NEXT_PUBLIC_STRIPE_PRO_PRICE_ID || '',
     name: 'Crew Pro',
     price: '$79',
     workers: 'Up to 25 workers',
@@ -43,7 +44,7 @@ const TIERS = [
     ],
   },
   {
-    id: process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID,
+    id: process.env.NEXT_PUBLIC_STRIPE_ENTERPRISE_PRICE_ID || '',
     name: 'Multi-Crew Enterprise',
     price: '$149',
     workers: 'Unlimited workers',
@@ -63,14 +64,21 @@ interface UserProfile {
   subscriptionId?: string;
 }
 
+function isValidIntentClientSecret(secret: unknown): secret is string {
+  return (
+    typeof secret === 'string' &&
+    (secret.startsWith('pi_') || secret.startsWith('seti_'))
+  );
+}
+
 function SignupFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tierParam = searchParams.get('tier');
 
   const getInitialPriceId = () => {
-    if (tierParam === 'pro') return TIERS[1].id;
-    if (tierParam === 'enterprise') return TIERS[2].id;
+    if (tierParam === 'pro' && TIERS[1].id) return TIERS[1].id;
+    if (tierParam === 'enterprise' && TIERS[2].id) return TIERS[2].id;
     return TIERS[0].id;
   };
 
@@ -82,8 +90,13 @@ function SignupFormContent() {
   const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
   const [isLoggedInUser, setIsLoggedInUser] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [activeSubscriptionId, setActiveSubscriptionId] = useState<
+    string | undefined
+  >(undefined);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
@@ -91,18 +104,34 @@ function SignupFormContent() {
         setIsLoggedInUser(true);
         setEmail(currentUser.email || '');
         setUserId(currentUser.uid);
+        setProfileLoading(true);
 
-        const userDocRef = doc(db, 'users', currentUser.uid);
-        const userSnap = await getDoc(userDocRef);
+        try {
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          const userSnap = await getDoc(userDocRef);
 
-        if (userSnap.exists()) {
-          const data = userSnap.data() as UserProfile;
-          setProfile(data);
+          if (userSnap.exists()) {
+            const data = userSnap.data() as UserProfile;
+            setProfile(data);
+            setActiveSubscriptionId(data.subscriptionId);
 
-          if (data.companyName) {
-            setCompanyName(data.companyName);
+            if (data.companyName) {
+              setCompanyName(data.companyName);
+            }
+          } else {
+            setProfile({});
           }
+        } catch (err) {
+          console.error('Failed to load user profile:', err);
+          setProfile({});
+        } finally {
+          setProfileLoading(false);
         }
+      } else {
+        setIsLoggedInUser(false);
+        setProfile(null);
+        setActiveSubscriptionId(undefined);
+        setProfileLoading(false);
       }
     });
 
@@ -112,9 +141,15 @@ function SignupFormContent() {
   const handleStartCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // GUARD: If logged in, ensure profile has finished loading so subscriptionId isn't undefined
-    if (isLoggedInUser && !profile) {
-      setError('Loading your account details. Please wait a second and try again.');
+    if (!stripePromise) {
+      setError('Stripe publishable key is not configured.');
+      return;
+    }
+
+    if (isLoggedInUser && profileLoading) {
+      setError(
+        'Loading your account details. Please wait a second and try again.'
+      );
       return;
     }
 
@@ -124,14 +159,13 @@ function SignupFormContent() {
       !companyName ||
       !selectedPriceId
     ) {
-      setError('Please fill in all required fields.');
+      setError('Please fill in all required fields and select a plan tier.');
       return;
     }
-    
-    // ... rest of your code
 
     setLoading(true);
     setError('');
+    setInfoMessage('');
 
     try {
       let uid = auth.currentUser?.uid;
@@ -142,7 +176,6 @@ function SignupFormContent() {
           email,
           password
         );
-
         uid = userCredential.user.uid;
       }
 
@@ -158,11 +191,15 @@ function SignupFormContent() {
           companyName,
           priceId: selectedPriceId,
           uid,
-          subscriptionId: profile?.subscriptionId,
+          subscriptionId: activeSubscriptionId || profile?.subscriptionId,
         }),
       });
 
       const data = await res.json();
+
+      if (data.subscriptionId) {
+        setActiveSubscriptionId(data.subscriptionId);
+      }
 
       if (!res.ok) {
         throw new Error(
@@ -170,27 +207,27 @@ function SignupFormContent() {
         );
       }
 
-      // Open Stripe checkout when a valid client secret is returned.
-      if (data.clientSecret) {
+      if (isValidIntentClientSecret(data.clientSecret)) {
         setClientSecret(data.clientSecret);
         return;
       }
 
-      // No payment required or the selected tier is already active.
-      if (
-        data.isDowngrade ||
-        data.isNoPaymentRequired ||
-        data.isNoChange
-      ) {
+      if (data.isNoChange) {
+        setInfoMessage(
+          'You are already subscribed to this tier. Select a different plan to switch tiers, or return to your dashboard.'
+        );
+        return;
+      }
+
+      if (data.isDowngrade || data.isNoPaymentRequired) {
         router.push('/dashboard');
         return;
       }
 
       setError(
         data.error ||
-        'Payment confirmation could not be generated. Please try again.'
+          'Payment confirmation could not be generated. Please try again.'
       );
-
     } catch (err: any) {
       console.error('Checkout initialization error:', err);
       setError(err.message || 'Unable to start checkout.');
@@ -200,7 +237,7 @@ function SignupFormContent() {
   };
 
   const selectedTierObj = TIERS.find(
-    (tier) => tier.id === selectedPriceId
+    (tier) => tier.id && tier.id === selectedPriceId
   );
 
   const getMaxWorkersForTier = (name?: string) => {
@@ -221,7 +258,6 @@ function SignupFormContent() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center py-12 px-6">
       <div className="max-w-lg w-full mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
-
         {!clientSecret ? (
           <>
             <div className="mb-6">
@@ -251,6 +287,12 @@ function SignupFormContent() {
             {error && (
               <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs rounded-xl">
                 {error}
+              </div>
+            )}
+
+            {infoMessage && (
+              <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs rounded-xl">
+                {infoMessage}
               </div>
             )}
 
@@ -310,53 +352,66 @@ function SignupFormContent() {
                   Select Subscription Tier
                 </label>
 
-                {TIERS.map((tier) => (
-                  <div
-                    key={tier.id}
-                    onClick={() => setSelectedPriceId(tier.id)}
-                    className={`p-4 rounded-xl border cursor-pointer transition ${
-                      selectedPriceId === tier.id
-                        ? 'border-blue-500 bg-blue-950/40'
-                        : 'border-slate-800 bg-slate-950 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <span className="font-bold text-white text-sm">
-                          {tier.name}
-                        </span>
+                {TIERS.map((tier) => {
+                  const isSelectable = Boolean(tier.id);
+                  const isSelected = isSelectable && selectedPriceId === tier.id;
 
-                        <span className="text-blue-400 font-extrabold text-sm ml-2">
-                          {tier.price}
-                          <span className="text-slate-400 text-xs font-normal">
-                            /mo
+                  return (
+                    <div
+                      key={tier.id || tier.name}
+                      onClick={() => {
+                        if (isSelectable) {
+                          setSelectedPriceId(tier.id);
+                          setInfoMessage('');
+                          setError('');
+                        }
+                      }}
+                      className={`p-4 rounded-xl border transition ${
+                        !isSelectable
+                          ? 'border-slate-800 bg-slate-950/50 opacity-50 cursor-not-allowed'
+                          : isSelected
+                            ? 'border-blue-500 bg-blue-950/40 cursor-pointer'
+                            : 'border-slate-800 bg-slate-950 hover:border-slate-700 cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <span className="font-bold text-white text-sm">
+                            {tier.name}
                           </span>
-                        </span>
+
+                          <span className="text-blue-400 font-extrabold text-sm ml-2">
+                            {tier.price}
+                            <span className="text-slate-400 text-xs font-normal">
+                              /mo
+                            </span>
+                          </span>
+                        </div>
+
+                        {isSelected && (
+                          <Check className="w-5 h-5 text-blue-400" />
+                        )}
                       </div>
 
-                      {selectedPriceId === tier.id && (
-                        <Check className="w-5 h-5 text-blue-400" />
-                      )}
+                      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2 border-t border-slate-800/60 text-xs text-slate-300">
+                        {tier.features.map((feature, idx) => (
+                          <li
+                            key={idx}
+                            className="flex items-center space-x-1.5"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
+                            <span>{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
-
-                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2 border-t border-slate-800/60 text-xs text-slate-300">
-                      {tier.features.map((feature, idx) => (
-                        <li
-                          key={idx}
-                          className="flex items-center space-x-1.5"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />
-                          <span>{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || (isLoggedInUser && profileLoading)}
                 className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition disabled:opacity-50 mt-4 shadow-lg shadow-blue-900/20"
               >
                 {loading
@@ -368,18 +423,33 @@ function SignupFormContent() {
             </form>
           </>
         ) : (
-          <Elements
-            key={clientSecret}
-            stripe={stripePromise}
-            options={{ clientSecret }}
-          >
-            <CheckoutForm
-              uid={userId}
-              clientSecret={clientSecret}
-              selectedTier={selectedTierObj?.name || 'Subscription'}
-              maxWorkers={getMaxWorkersForTier(selectedTierObj?.name)}
-            />
-          </Elements>
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                setClientSecret('');
+                setError('');
+                setInfoMessage('');
+              }}
+              className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-400 hover:text-white transition mb-4"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Change Plan Tier</span>
+            </button>
+
+            <Elements
+              key={clientSecret}
+              stripe={stripePromise}
+              options={{ clientSecret }}
+            >
+              <CheckoutForm
+                uid={userId}
+                clientSecret={clientSecret}
+                selectedTier={selectedTierObj?.name || 'Subscription'}
+                maxWorkers={getMaxWorkersForTier(selectedTierObj?.name)}
+              />
+            </Elements>
+          </div>
         )}
       </div>
     </div>
