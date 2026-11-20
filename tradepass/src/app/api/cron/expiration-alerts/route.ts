@@ -1,9 +1,39 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { adminDb } from '@/lib/firebaseAdmin';
 import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+const FROM_EMAIL =
+  process.env.RESEND_FROM_EMAIL ||
+  'TradePass Compliance <onboarding@resend.dev>';
+
+function parseLocalDate(dateStr: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    const day = Number(match[3]);
+    return new Date(year, month, day, 0, 0, 0, 0);
+  }
+
+  const parsed = new Date(dateStr);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function isStandardTier(userData: FirebaseFirestore.DocumentData): boolean {
+  const tier = (
+    userData.planTier ||
+    userData.subscriptionTier ||
+    'Standard Crew'
+  )
+    .toString()
+    .toLowerCase();
+
+  return tier === 'standard' || tier === 'standard crew';
+}
 
 export async function GET(request: Request) {
   // 1. Verify Vercel Cron Secret Header
@@ -13,7 +43,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const usersSnapshot = await getDocs(collection(db, 'users'));
+    const usersSnapshot = await adminDb.collection('users').get();
     let emailsSent = 0;
 
     const today = new Date();
@@ -24,12 +54,16 @@ export async function GET(request: Request) {
       const userId = userDoc.id;
       const userEmail = userData.email;
       const companyName = userData.companyName || 'Your Company';
-      const userTier = userData.subscriptionTier || 'standard'; // Default to standard tier
+      const standardOnly = isStandardTier(userData);
 
       if (!userEmail) continue;
 
-      const workersSnapshot = await getDocs(collection(db, `users/${userId}/workers`));
-      
+      const workersSnapshot = await adminDb
+        .collection('users')
+        .doc(userId)
+        .collection('workers')
+        .get();
+
       const expiringWorkers30Days: any[] = [];
       const expiringWorkers15Days: any[] = [];
       const expiringWorkers7Days: any[] = [];
@@ -39,11 +73,11 @@ export async function GET(request: Request) {
         const worker = workerDoc.data();
         if (!worker.oshaExpDate) return;
 
-        const expDate = new Date(worker.oshaExpDate);
-        expDate.setHours(0, 0, 0, 0);
+        const expDate = parseLocalDate(String(worker.oshaExpDate));
+        if (!expDate) return;
 
         const diffTime = expDate.getTime() - today.getTime();
-        const daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const daysRemaining = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
         const item = {
           name: worker.name,
@@ -53,23 +87,32 @@ export async function GET(request: Request) {
 
         if (daysRemaining === 30) expiringWorkers30Days.push(item);
         if (daysRemaining === 15) expiringWorkers15Days.push(item);
-        
+
         // 7-day and 1-day milestones reserved for Pro and Enterprise tiers
-        if (userTier !== 'standard') {
+        if (!standardOnly) {
           if (daysRemaining === 7) expiringWorkers7Days.push(item);
           if (daysRemaining === 1) expiringWorkers1Day.push(item);
         }
       });
 
-      const passportUrl = `${process.env.NEXT_PUBLIC_APP_URL}/passport/${userId}`;
+      const appUrl =
+        process.env.NEXT_PUBLIC_APP_URL || 'https://tradepass-nine.vercel.app';
+      const passportUrl = `${appUrl}/passport/${userId}`;
 
-      const sendAlertEmail = async (workers: any[], timeframeText: string, urgencyBadge: string) => {
+      const sendAlertEmail = async (
+        workers: any[],
+        timeframeText: string,
+        urgencyBadge: string
+      ) => {
         const listHtml = workers
-          .map(w => `<li style="margin-bottom: 6px;"><strong>${w.name}</strong> - ${w.cardType} (Expires: ${w.expDate})</li>`)
+          .map(
+            (w) =>
+              `<li style="margin-bottom: 6px;"><strong>${w.name}</strong> - ${w.cardType} (Expires: ${w.expDate})</li>`
+          )
           .join('');
 
-        await resend.emails.send({
-          from: 'TradePass Compliance <compliance@tradepass.com>',
+        const { error } = await resend.emails.send({
+          from: FROM_EMAIL,
           to: userEmail,
           subject: `${urgencyBadge} ${workers.length} worker credential(s) expiring in ${timeframeText}`,
           html: `
@@ -88,22 +131,44 @@ export async function GET(request: Request) {
             </div>
           `,
         });
+
+        if (error) {
+          console.error(`Resend error for ${userEmail}:`, error);
+          throw new Error(error.message);
+        }
+
         emailsSent++;
       };
 
       // Dispatch milestone emails based on tier access
       if (expiringWorkers30Days.length > 0) {
-        await sendAlertEmail(expiringWorkers30Days, '30 days', '[NOTICE - 30 DAYS]');
+        await sendAlertEmail(
+          expiringWorkers30Days,
+          '30 days',
+          '[NOTICE - 30 DAYS]'
+        );
       }
       if (expiringWorkers15Days.length > 0) {
-        await sendAlertEmail(expiringWorkers15Days, '15 days', '[WARNING - 15 DAYS]');
+        await sendAlertEmail(
+          expiringWorkers15Days,
+          '15 days',
+          '[WARNING - 15 DAYS]'
+        );
       }
-      if (userTier !== 'standard') {
+      if (!standardOnly) {
         if (expiringWorkers7Days.length > 0) {
-          await sendAlertEmail(expiringWorkers7Days, '7 days', '[ACTION REQUIRED - 7 DAYS]');
+          await sendAlertEmail(
+            expiringWorkers7Days,
+            '7 days',
+            '[ACTION REQUIRED - 7 DAYS]'
+          );
         }
         if (expiringWorkers1Day.length > 0) {
-          await sendAlertEmail(expiringWorkers1Day, '24 HOURS', '[URGENT - 1 DAY]');
+          await sendAlertEmail(
+            expiringWorkers1Day,
+            '24 HOURS',
+            '[URGENT - 1 DAY]'
+          );
         }
       }
     }
