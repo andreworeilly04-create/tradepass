@@ -1,8 +1,12 @@
-
 'use client';
 
 import React, { useState } from 'react';
-import { useStripe, useElements, PaymentElement } from '@stripe/react-stripe-js';
+import {
+  useStripe,
+  useElements,
+  PaymentElement,
+} from '@stripe/react-stripe-js';
+import type { StripePaymentElementChangeEvent } from '@stripe/stripe-js';
 import { useRouter } from 'next/navigation';
 import { CreditCard, Lock, Loader2 } from 'lucide-react';
 
@@ -24,18 +28,41 @@ export default function CheckoutForm({
   const router = useRouter();
 
   const [message, setMessage] = useState<string | null>(null);
+  const [isSuccess, setIsSuccess] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isElementComplete, setIsElementComplete] = useState(false);
+
+  const handleElementChange = (event: StripePaymentElementChangeEvent) => {
+    setIsElementComplete(event.complete);
+
+    if (!isSuccess) {
+      setMessage(null);
+    }
+  };
+
+  const handleElementLoadError = (event: { error: { message?: string } }) => {
+    console.error('🔍 PaymentElement Load Error:', event.error);
+    setMessage(
+      event.error?.message ||
+        'Unable to load payment form. Please refresh and try again.'
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!stripe || !elements || isProcessing) return;
 
+    if (!clientSecret) {
+      setMessage('Missing payment session details. Please restart checkout.');
+      return;
+    }
+
     setIsProcessing(true);
+    setIsSuccess(false);
     setMessage(null);
 
     try {
-      // Validate the Stripe Payment Element.
       const { error: submitError } = await elements.submit();
 
       if (submitError) {
@@ -46,56 +73,56 @@ export default function CheckoutForm({
         return;
       }
 
-      // Stripe SetupIntent client secrets start with seti_.
-      // PaymentIntent client secrets start with pi_.
       const isSetupIntent = clientSecret.startsWith('seti_');
-      console.log('🔍 Intent Type:', isSetupIntent ? 'SetupIntent' : 'PaymentIntent');
-      console.log('🔍 Client Secret:', clientSecret);
+      const isPaymentIntent = clientSecret.startsWith('pi_');
 
-      let result: any;
-
-      if (isSetupIntent) {
-        // Confirm card setup when Stripe requires a SetupIntent.
-        result = await stripe.confirmSetup({
-          elements,
-          clientSecret,
-          confirmParams: {
-            return_url: `${window.location.origin}/dashboard`,
-          },
-          redirect: 'if_required',
-        });
-      } else {
-        // Confirm payment when Stripe requires a PaymentIntent.
-        result = await stripe.confirmPayment({
-          elements,
-          clientSecret,
-          confirmParams: {
-            return_url: `${window.location.origin}/dashboard`,
-          },
-          redirect: 'if_required',
-        });
-      }
-
-      console.log('🔍 Stripe Confirmation Raw Result:', result);
-
-      // Handle Stripe errors.
-      if (result.error) {
-        console.error('🔍 Stripe Confirmation Error Object:', result.error);
+      if (!isSetupIntent && !isPaymentIntent) {
         setMessage(
-          result.error.message ||
-          'An unexpected error occurred during payment.'
+          'Invalid payment intent configuration. Please try again.'
         );
         return;
       }
 
-      // Verify the returned Stripe intent status.
+      const returnUrl = `${window.location.origin}/dashboard?uid=${encodeURIComponent(
+        uid
+      )}&tier=${encodeURIComponent(selectedTier)}&maxWorkers=${maxWorkers}`;
+
+      let result: any;
+
+      if (isSetupIntent) {
+        result = await stripe.confirmSetup({
+          elements,
+          clientSecret,
+          confirmParams: {
+            return_url: returnUrl,
+          },
+          redirect: 'if_required',
+        });
+      } else {
+        result = await stripe.confirmPayment({
+          elements,
+          clientSecret,
+          confirmParams: {
+            return_url: returnUrl,
+          },
+          redirect: 'if_required',
+        });
+      }
+
+      if (result.error) {
+        console.error('🔍 Stripe Confirmation Error Object:', result.error);
+        setMessage(
+          result.error.message ||
+            'An unexpected error occurred during payment.'
+        );
+        return;
+      }
+
       const intentStatus = isSetupIntent
         ? result.setupIntent?.status
         : result.paymentIntent?.status;
 
-      console.log('🔍 Confirmed Intent Status:', intentStatus);
-
-      if (intentStatus !== 'succeeded') {
+      if (intentStatus !== 'succeeded' && intentStatus !== 'processing') {
         setMessage(
           `Your payment has not completed yet. Current status: ${
             intentStatus || 'unknown'
@@ -104,17 +131,19 @@ export default function CheckoutForm({
         return;
       }
 
+      setIsSuccess(true);
       setMessage(
-        'Payment confirmed! Your subscription is being updated. Redirecting...'
+        intentStatus === 'processing'
+          ? 'Payment is processing! Redirecting to your dashboard...'
+          : 'Payment confirmed! Your subscription is being updated. Redirecting...'
       );
 
       router.push('/dashboard');
-
+      router.refresh();
     } catch (error: any) {
       console.error('🔍 Checkout Exception Error:', error);
-
       setMessage(
-        error.message || 'Unable to process payment. Please try again.'
+        error?.message || 'Unable to process payment. Please try again.'
       );
     } finally {
       setIsProcessing(false);
@@ -144,13 +173,16 @@ export default function CheckoutForm({
 
       {/* Embedded Stripe Payment Element */}
       <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 min-h-[150px]">
-        <PaymentElement />
+        <PaymentElement
+          onChange={handleElementChange}
+          onLoadError={handleElementLoadError}
+        />
       </div>
 
       {message && (
         <div
           className={`p-3 rounded-xl text-xs font-semibold ${
-            message.includes('confirmed!')
+            isSuccess
               ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
               : 'bg-rose-950 text-rose-400 border border-rose-800'
           }`}
@@ -161,7 +193,7 @@ export default function CheckoutForm({
 
       <button
         type="submit"
-        disabled={isProcessing || !stripe || !elements}
+        disabled={isProcessing || !stripe || !elements || !isElementComplete}
         className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl text-xs transition flex items-center justify-center space-x-2 shadow-lg shadow-blue-600/20 disabled:opacity-50"
       >
         {isProcessing ? (

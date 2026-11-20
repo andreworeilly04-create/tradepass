@@ -6,6 +6,11 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-10-28.endive' as any,
 });
 
+const SUBSCRIPTION_EXPANDS = [
+  'latest_invoice.confirmation_secret',
+  'pending_setup_intent',
+] as const;
+
 // ==========================================
 // TRADEPASS TIER CONFIGURATION
 // ==========================================
@@ -53,29 +58,14 @@ async function getSubscriptionClientSecret(
 
     if (typeof latestInvoice === 'string') {
       invoice = await stripe.invoices.retrieve(latestInvoice, {
-        expand: ['confirmation_secret', 'payment_intent'],
+        expand: ['confirmation_secret'],
       });
     }
 
-    // Modern Stripe API versions (2026-10-28.endive) expose client_secret via confirmation_secret
+    // Stripe API 2026-10-28.endive exposes client_secret via confirmation_secret
     if (invoice?.confirmation_secret?.client_secret) {
       return {
         clientSecret: invoice.confirmation_secret.client_secret,
-        intentType: 'payment',
-      };
-    }
-
-    let paymentIntent: any = invoice?.payment_intent || null;
-
-    if (typeof paymentIntent === 'string') {
-      paymentIntent = await stripe.paymentIntents.retrieve(
-        paymentIntent
-      );
-    }
-
-    if (paymentIntent?.client_secret) {
-      return {
-        clientSecret: paymentIntent.client_secret,
         intentType: 'payment',
       };
     }
@@ -232,9 +222,13 @@ export async function POST(req: Request) {
         await stripe.subscriptions.retrieve(activeSubId);
       } catch (err: any) {
         console.warn(
-          `Passed subscriptionId "${activeSubId}" not found, falling back to customer lookup.`
+          `Passed subscriptionId "${activeSubId}" not found, clearing stale ID and falling back to customer lookup.`
         );
         activeSubId = null;
+        await adminDb.collection('users').doc(uid).set(
+          { subscriptionId: null, updatedAt: new Date() },
+          { merge: true }
+        );
       }
     }
 
@@ -267,11 +261,7 @@ export async function POST(req: Request) {
       const subscription = await stripe.subscriptions.retrieve(
         activeSubId,
         {
-          expand: [
-            'latest_invoice.confirmation_secret',
-            'latest_invoice.payment_intent',
-            'pending_setup_intent',
-          ],
+          expand: [...SUBSCRIPTION_EXPANDS],
         }
       );
 
@@ -295,6 +285,23 @@ export async function POST(req: Request) {
       // ==========================================
 
       if (subscription.status === 'incomplete') {
+        const currentItem = subscription.items.data[0];
+
+        if (currentItem?.price.id === priceId) {
+          const intent = await getSubscriptionClientSecret(
+            subscription
+          );
+
+          if (intent.clientSecret) {
+            return NextResponse.json({
+              success: true,
+              subscriptionId: subscription.id,
+              clientSecret: intent.clientSecret,
+              intentType: intent.intentType,
+            });
+          }
+        }
+
         await cancelAndVoidSubscription(subscription);
         activeSubId = null;
       }
@@ -405,7 +412,7 @@ export async function POST(req: Request) {
         }
 
         // ==========================================
-        // UPGRADE (SAVE PAYMENT METHOD, NO ALWAYS_INVOICE)
+        // UPGRADE (IMMEDIATE INVOICE + PAYMENT ELEMENT)
         // ==========================================
 
         const updatedSubscription =
@@ -418,16 +425,13 @@ export async function POST(req: Request) {
                   price: priceId,
                 },
               ],
+              proration_behavior: 'always_invoice',
               cancel_at_period_end: false,
               payment_behavior: 'default_incomplete',
               payment_settings: {
                 save_default_payment_method: 'on_subscription',
               },
-              expand: [
-                'latest_invoice.confirmation_secret',
-                'latest_invoice.payment_intent',
-                'pending_setup_intent',
-              ],
+              expand: [...SUBSCRIPTION_EXPANDS],
             }
           );
 
@@ -516,11 +520,7 @@ export async function POST(req: Request) {
       metadata: {
         firebaseUID: uid,
       },
-      expand: [
-        'latest_invoice.confirmation_secret',
-        'latest_invoice.payment_intent',
-        'pending_setup_intent',
-      ],
+      expand: [...SUBSCRIPTION_EXPANDS],
     });
 
     const intent = await getSubscriptionClientSecret(
