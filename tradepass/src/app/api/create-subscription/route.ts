@@ -535,7 +535,7 @@ export async function POST(req: Request) {
                     price: priceId,
                   },
                 ],
-                proration_behavior: 'create_prorations',
+                proration_behavior: 'always_invoice',
                 cancel_at_period_end: false,
               }
             );
@@ -563,10 +563,11 @@ export async function POST(req: Request) {
                 },
               ],
               proration_behavior: 'always_invoice',
+              pending_invoice_items_behavior: 'include',
               cancel_at_period_end: false,
               payment_behavior: 'pending_if_incomplete',
               expand: [...SUBSCRIPTION_EXPANDS],
-            }
+            } as any
           );
 
           const intent = await getSubscriptionClientSecret(
@@ -598,6 +599,7 @@ export async function POST(req: Request) {
 
           if (
             updatedItem &&
+            !(updatedSubscription as any).pending_update &&
             (updatedSubscription.status === 'active' ||
               updatedSubscription.status === 'trialing')
           ) {
