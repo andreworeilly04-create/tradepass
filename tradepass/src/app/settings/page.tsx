@@ -122,6 +122,7 @@ export default function SettingsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          uid: user.uid,
           subscriptionId: profile.subscriptionId,
         }),
       });
