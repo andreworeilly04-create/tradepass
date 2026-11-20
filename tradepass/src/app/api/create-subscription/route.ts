@@ -535,7 +535,7 @@ export async function POST(req: Request) {
                     price: priceId,
                   },
                 ],
-                proration_behavior: 'create_prorations',
+                proration_behavior: 'none',
                 cancel_at_period_end: false,
               }
             );
