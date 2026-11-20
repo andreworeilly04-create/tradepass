@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
@@ -71,6 +70,28 @@ function isValidIntentClientSecret(secret: unknown): secret is string {
   );
 }
 
+function getPriceIdForPlanTier(planTier?: string): string | null {
+  if (!planTier) return null;
+  const normalized = planTier.toLowerCase();
+
+  if (
+    (normalized.includes('enterprise') || normalized.includes('multi')) &&
+    TIERS[2].id
+  ) {
+    return TIERS[2].id;
+  }
+
+  if (normalized.includes('pro') && TIERS[1].id) {
+    return TIERS[1].id;
+  }
+
+  if (normalized.includes('standard') && TIERS[0].id) {
+    return TIERS[0].id;
+  }
+
+  return null;
+}
+
 function SignupFormContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -118,6 +139,11 @@ function SignupFormContent() {
             if (data.companyName) {
               setCompanyName(data.companyName);
             }
+
+            const currentTierPriceId = getPriceIdForPlanTier(data.planTier);
+            if (!tierParam && currentTierPriceId) {
+              setSelectedPriceId(currentTierPriceId);
+            }
           } else {
             setProfile({});
           }
@@ -136,7 +162,17 @@ function SignupFormContent() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [tierParam]);
+
+  const handleBackFromCheckout = () => {
+    setClientSecret('');
+    setError('');
+    setInfoMessage('');
+    const currentTierPriceId = getPriceIdForPlanTier(profile?.planTier);
+    if (currentTierPriceId) {
+      setSelectedPriceId(currentTierPriceId);
+    }
+  };
 
   const handleStartCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -426,11 +462,7 @@ function SignupFormContent() {
           <div>
             <button
               type="button"
-              onClick={() => {
-                setClientSecret('');
-                setError('');
-                setInfoMessage('');
-              }}
+              onClick={handleBackFromCheckout}
               className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-400 hover:text-white transition mb-4"
             >
               <ArrowLeft className="w-4 h-4" />

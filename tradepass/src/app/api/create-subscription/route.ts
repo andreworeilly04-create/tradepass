@@ -11,6 +11,12 @@ const SUBSCRIPTION_EXPANDS = [
   'pending_setup_intent',
 ] as const;
 
+const TERMINAL_PI_STATUSES = new Set([
+  'succeeded',
+  'canceled',
+  'processing',
+]);
+
 // ==========================================
 // TRADEPASS TIER CONFIGURATION
 // ==========================================
@@ -49,7 +55,11 @@ function getTierDetails(priceId: string) {
 
 async function getSubscriptionClientSecret(
   subscription: Stripe.Subscription
-) {
+): Promise<{
+  clientSecret: string | null;
+  intentType: 'payment' | 'setup' | null;
+  alreadyPaid?: boolean;
+}> {
   let setupIntent: any = subscription.pending_setup_intent;
   const latestInvoice: any = subscription.latest_invoice;
 
@@ -62,9 +72,59 @@ async function getSubscriptionClientSecret(
       });
     }
 
-    if (invoice?.confirmation_secret?.client_secret) {
+    if (invoice?.status === 'paid') {
       return {
-        clientSecret: invoice.confirmation_secret.client_secret,
+        clientSecret: null,
+        intentType: null,
+        alreadyPaid: true,
+      };
+    }
+
+    const secret = invoice?.confirmation_secret?.client_secret;
+
+    if (typeof secret === 'string' && secret.startsWith('pi_')) {
+      const piId = secret.split('_secret_')[0];
+      try {
+        const pi = await stripe.paymentIntents.retrieve(piId);
+
+        if (pi.status === 'succeeded') {
+          return {
+            clientSecret: null,
+            intentType: null,
+            alreadyPaid: true,
+          };
+        }
+
+        if (
+          !TERMINAL_PI_STATUSES.has(pi.status) &&
+          (pi.status === 'requires_payment_method' ||
+            pi.status === 'requires_confirmation' ||
+            pi.status === 'requires_action')
+        ) {
+          return {
+            clientSecret: secret,
+            intentType: 'payment',
+          };
+        }
+
+        return {
+          clientSecret: null,
+          intentType: null,
+        };
+      } catch (err) {
+        console.warn('Could not verify PaymentIntent status:', err);
+        return {
+          clientSecret: null,
+          intentType: null,
+        };
+      }
+    } else if (
+      secret &&
+      invoice?.status !== 'void' &&
+      invoice?.status !== 'uncollectible'
+    ) {
+      return {
+        clientSecret: secret,
         intentType: 'payment',
       };
     }
@@ -74,7 +134,11 @@ async function getSubscriptionClientSecret(
     setupIntent = await stripe.setupIntents.retrieve(setupIntent);
   }
 
-  if (setupIntent?.client_secret) {
+  if (
+    setupIntent?.client_secret &&
+    setupIntent.status !== 'succeeded' &&
+    setupIntent.status !== 'canceled'
+  ) {
     return {
       clientSecret: setupIntent.client_secret,
       intentType: 'setup',
@@ -307,6 +371,15 @@ export async function POST(req: Request) {
           if (currentItem?.price.id === priceId) {
             const intent = await getSubscriptionClientSecret(subscription);
 
+            if (intent.alreadyPaid) {
+              await saveSubscriptionTier(uid, subscription, newTier);
+              return NextResponse.json({
+                success: true,
+                isNoPaymentRequired: true,
+                subscriptionId: subscription.id,
+              });
+            }
+
             if (intent.clientSecret) {
               return NextResponse.json({
                 success: true,
@@ -340,6 +413,15 @@ export async function POST(req: Request) {
                 updatedIncomplete
               );
 
+              if (intent.alreadyPaid) {
+                await saveSubscriptionTier(uid, updatedIncomplete, newTier);
+                return NextResponse.json({
+                  success: true,
+                  isNoPaymentRequired: true,
+                  subscriptionId: updatedIncomplete.id,
+                });
+              }
+
               if (intent.clientSecret) {
                 return NextResponse.json({
                   success: true,
@@ -372,6 +454,15 @@ export async function POST(req: Request) {
 
           if (currentItem?.price.id === priceId) {
             const intent = await getSubscriptionClientSecret(subscription);
+
+            if (intent.alreadyPaid) {
+              await saveSubscriptionTier(uid, subscription, newTier);
+              return NextResponse.json({
+                success: true,
+                isNoPaymentRequired: true,
+                subscriptionId: subscription.id,
+              });
+            }
 
             if (intent.clientSecret) {
               return NextResponse.json({
@@ -482,6 +573,16 @@ export async function POST(req: Request) {
             updatedSubscription
           );
 
+          if (intent.alreadyPaid) {
+            await saveSubscriptionTier(uid, updatedSubscription, newTier);
+
+            return NextResponse.json({
+              success: true,
+              isNoPaymentRequired: true,
+              subscriptionId: updatedSubscription.id,
+            });
+          }
+
           if (intent.clientSecret) {
             return NextResponse.json({
               success: true,
@@ -575,6 +676,16 @@ export async function POST(req: Request) {
       },
       { merge: true }
     );
+
+    if (intent.alreadyPaid) {
+      await saveSubscriptionTier(uid, subscription, newTier);
+
+      return NextResponse.json({
+        success: true,
+        isNoPaymentRequired: true,
+        subscriptionId: subscription.id,
+      });
+    }
 
     if (intent.clientSecret) {
       return NextResponse.json({
