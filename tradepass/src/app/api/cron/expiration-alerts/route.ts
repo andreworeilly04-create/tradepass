@@ -34,10 +34,7 @@ function getAllowedMilestones(userData: FirebaseFirestore.DocumentData): number[
     .trim();
 
   // Multi / Enterprise: 30, 15, 7, and 1-day final urgent alert
-  if (
-    tier.includes('multi') ||
-    tier.includes('enterprise')
-  ) {
+  if (tier.includes('multi') || tier.includes('enterprise')) {
     return [30, 15, 7, 1];
   }
 
@@ -70,6 +67,7 @@ export async function GET(request: Request) {
       const userEmail = userData.email;
       const companyName = userData.companyName || 'Your Company';
       const allowedMilestones = getAllowedMilestones(userData);
+      const hasPublicPassport = allowedMilestones.includes(7);
 
       if (!userEmail) continue;
 
@@ -110,6 +108,7 @@ export async function GET(request: Request) {
 
       const appUrl =
         process.env.NEXT_PUBLIC_APP_URL || 'https://tradepass-nine.vercel.app';
+      const dashboardUrl = `${appUrl}/dashboard`;
       const passportUrl = `${appUrl}/passport/${userId}`;
 
       const sendAlertEmail = async (
@@ -133,6 +132,12 @@ export async function GET(request: Request) {
           ? `This is a final reminder that the following worker certification(s) expire in <strong>${timeframeText}</strong>:`
           : `This is an automated reminder that the following worker certification(s) are scheduled to expire in <strong>${timeframeText}</strong>:`;
 
+        const passportFooterHtml = hasPublicPassport
+          ? `<p style="margin-top: 12px; font-size: 12px; color: #64748b;">
+               Public GC Roster Link (Read-Only): <a href="${passportUrl}" style="color: #2563eb;">${passportUrl}</a>
+             </p>`
+          : '';
+
         const { error } = await resend.emails.send({
           from: FROM_EMAIL,
           to: userEmail,
@@ -146,10 +151,11 @@ export async function GET(request: Request) {
                 ${listHtml}
               </ul>
               <p style="margin-top: 24px;">
-                <a href="${passportUrl}" style="background-color: #2563eb; color: #ffffff; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                  View & Update Live GC Passport
+                <a href="${dashboardUrl}" style="background-color: #2563eb; color: #ffffff; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+                  Update Certifications in Dashboard
                 </a>
               </p>
+              ${passportFooterHtml}
             </div>
           `,
         });
