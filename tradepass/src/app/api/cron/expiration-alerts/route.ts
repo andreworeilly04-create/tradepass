@@ -108,7 +108,7 @@ export async function GET(request: Request) {
 
       const appUrl =
         process.env.NEXT_PUBLIC_APP_URL || 'https://tradepass-nine.vercel.app';
-      const dashboardUrl = `${appUrl}/dashboard?account=${encodeURIComponent(userEmail)}`;
+      const dashboardUrl = `${appUrl}/dashboard`;
       const passportUrl = `${appUrl}/passport/${userId}`;
 
       const sendAlertEmail = async (
@@ -133,7 +133,7 @@ export async function GET(request: Request) {
           : `This is an automated reminder that the following worker certification(s) are scheduled to expire in <strong>${timeframeText}</strong>:`;
 
         const passportFooterHtml = hasPublicPassport
-          ? `<p style="margin-top: 12px; font-size: 12px; color: #64748b;">
+          ? `<p style="margin-top: 10px; font-size: 12px; color: #64748b;">
                Public GC Roster Link (Read-Only): <a href="${passportUrl}" style="color: #2563eb;">${passportUrl}</a>
              </p>`
           : '';
@@ -150,13 +150,8 @@ export async function GET(request: Request) {
               <ul style="background-color: #f8fafc; padding: 16px 24px; border-radius: 6px; border: 1px solid #cbd5e1;">
                 ${listHtml}
               </ul>
-              <p style="margin-top: 24px;">
-                <a href="${dashboardUrl}" style="background-color: #2563eb; color: #ffffff; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                  Update Certifications in Dashboard
-                </a>
-              </p>
-              <p style="margin-top: 8px; font-size: 12px; color: #64748b;">
-                Sign in with <strong>${userEmail}</strong> to manage this company's roster.
+              <p style="margin-top: 20px; font-size: 13px; color: #334155;">
+                To update certifications, sign in to <a href="${dashboardUrl}" style="color: #2563eb; font-weight: bold;">${dashboardUrl}</a> using <strong>${userEmail}</strong>.
               </p>
               ${passportFooterHtml}
             </div>
