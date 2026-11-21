@@ -108,7 +108,7 @@ export async function GET(request: Request) {
 
       const appUrl =
         process.env.NEXT_PUBLIC_APP_URL || 'https://tradepass-nine.vercel.app';
-      const dashboardUrl = `${appUrl}/dashboard`;
+      const dashboardUrl = `${appUrl}/dashboard?account=${encodeURIComponent(userEmail)}`;
       const passportUrl = `${appUrl}/passport/${userId}`;
 
       const sendAlertEmail = async (
@@ -154,6 +154,9 @@ export async function GET(request: Request) {
                 <a href="${dashboardUrl}" style="background-color: #2563eb; color: #ffffff; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
                   Update Certifications in Dashboard
                 </a>
+              </p>
+              <p style="margin-top: 8px; font-size: 12px; color: #64748b;">
+                Sign in with <strong>${userEmail}</strong> to manage this company's roster.
               </p>
               ${passportFooterHtml}
             </div>
