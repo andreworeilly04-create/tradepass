@@ -22,7 +22,8 @@ import {
   UserCheck,
   Trash2,
   Share2,
-  FileCheck
+  FileCheck,
+  Pencil
 } from 'lucide-react';
 import { 
   collection, 
@@ -103,10 +104,11 @@ export default function DashboardPage() {
   const [showForemanModal, setShowForemanModal] = useState(false);
   const [showBrandingModal, setShowBrandingModal] = useState(false);
   
-  // Worker Deletion & Details Modals
+  // Worker Deletion, Details & Edit Modals
   const [workerToDelete, setWorkerToDelete] = useState<Worker | null>(null);
   const [deletingWorker, setDeletingWorker] = useState(false);
   const [workerDetailsModal, setWorkerDetailsModal] = useState<Worker | null>(null);
+  const [workerToEdit, setWorkerToEdit] = useState<Worker | null>(null);
 
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -118,6 +120,16 @@ export default function DashboardPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+
+  // Edit Certificate Form State
+  const [editWorkerName, setEditWorkerName] = useState('');
+  const [editWorkerRole, setEditWorkerRole] = useState('');
+  const [editWorkerTrade, setEditWorkerTrade] = useState('General');
+  const [editOshaCertNumber, setEditOshaCertNumber] = useState('');
+  const [editOshaExpDate, setEditOshaExpDate] = useState('');
+  const [editSelectedFile, setEditSelectedFile] = useState<File | null>(null);
+  const [updatingWorker, setUpdatingWorker] = useState(false);
+  const [editFormError, setEditFormError] = useState('');
 
   const [newForemanEmail, setNewForemanEmail] = useState('');
   const [brandingLogoUrl, setBrandingLogoUrl] = useState('');
@@ -352,6 +364,56 @@ export default function DashboardPage() {
       setFormError(err.message || 'Failed to add worker profile.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openEditWorkerModal = (worker: Worker) => {
+    setWorkerDetailsModal(null);
+    setEditFormError('');
+    setWorkerToEdit(worker);
+    setEditWorkerName(worker.name || '');
+    setEditWorkerRole(worker.role || '');
+    setEditWorkerTrade(worker.trade || 'General');
+    setEditOshaCertNumber(
+      worker.oshaCertNumber && worker.oshaCertNumber !== 'N/A'
+        ? worker.oshaCertNumber
+        : ''
+    );
+    setEditOshaExpDate(worker.oshaExpDate || '');
+    setEditSelectedFile(null);
+  };
+
+  const handleUpdateWorker = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditFormError('');
+
+    if (!user || !workerToEdit || !editWorkerName.trim()) return;
+
+    try {
+      setUpdatingWorker(true);
+      const updatedFileName = editSelectedFile
+        ? editSelectedFile.name
+        : workerToEdit.fileName || null;
+      const updatedCertNumber = editOshaCertNumber.trim() || 'N/A';
+
+      await updateDoc(doc(db, 'users', user.uid, 'workers', workerToEdit.id), {
+        name: editWorkerName.trim(),
+        role: editWorkerRole.trim() || 'Technician',
+        trade: editWorkerTrade || 'General',
+        oshaCertNumber: updatedCertNumber,
+        oshaExpDate: editOshaExpDate || '',
+        fileName: updatedFileName,
+        docsCount: updatedFileName || updatedCertNumber !== 'N/A' ? 1 : 0,
+        updatedAt: serverTimestamp(),
+      });
+
+      setWorkerToEdit(null);
+      setEditSelectedFile(null);
+    } catch (err: any) {
+      console.error('Error updating certificate:', err);
+      setEditFormError(err.message || 'Failed to update certificate.');
+    } finally {
+      setUpdatingWorker(false);
     }
   };
 
@@ -766,6 +828,15 @@ export default function DashboardPage() {
                       <td className="px-6 py-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end space-x-3">
                           <button 
+                            onClick={() => openEditWorkerModal(worker)}
+                            className="inline-flex items-center space-x-1 text-xs font-semibold text-amber-400 hover:text-amber-300 transition cursor-pointer"
+                            title="Edit Certificate"
+                          >
+                            <Pencil className="w-3.5 h-3.5 shrink-0" />
+                            <span>Edit Certificate</span>
+                          </button>
+
+                          <button 
                             onClick={() => setWorkerDetailsModal(worker)}
                             className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer"
                           >
@@ -788,6 +859,156 @@ export default function DashboardPage() {
             )}
           </div>
         </section>
+
+        {/* Modal: Edit Worker Certificate */}
+        {workerToEdit && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+              <header className="flex justify-between items-center mb-4">
+                <div className="flex items-center space-x-2 text-amber-400">
+                  <Pencil className="w-4 h-4 shrink-0" />
+                  <h3 className="text-base sm:text-lg font-bold text-white">Edit Worker Certificate</h3>
+                </div>
+                <button 
+                  onClick={() => setWorkerToEdit(null)}
+                  className="text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </header>
+
+              {editFormError && (
+                <div className="mb-4 p-3 bg-red-950/50 border border-red-800 text-red-300 text-xs rounded-xl flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  <span>{editFormError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleUpdateWorker} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                    Worker Full Name
+                  </label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="e.g. Marcus Vance"
+                    value={editWorkerName}
+                    onChange={(e) => setEditWorkerName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                    Trade Specialty
+                  </label>
+                  <select
+                    value={editWorkerTrade}
+                    onChange={(e) => setEditWorkerTrade(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="General">General / Other</option>
+                    <option value="Flooring">Flooring</option>
+                    <option value="Electrical">Electrical</option>
+                    <option value="Plumbing">Plumbing</option>
+                    <option value="HVAC">HVAC</option>
+                    <option value="Carpentry">Carpentry</option>
+                    <option value="Roofing">Roofing</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                    Role / Position
+                  </label>
+                  <input 
+                    type="text" 
+                    required
+                    placeholder="e.g. Flooring Technician"
+                    value={editWorkerRole}
+                    onChange={(e) => setEditWorkerRole(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                    Credential / Policy Number
+                  </label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. OSHA-30-99482, LIC-88412, or POL-40921"
+                    value={editOshaCertNumber}
+                    onChange={(e) => setEditOshaCertNumber(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      Expiration Date
+                    </label>
+                    <span className="text-[11px] text-slate-500">Optional if non-expiring</span>
+                  </div>
+                  <input 
+                    type="date" 
+                    value={editOshaExpDate}
+                    onChange={(e) => setEditOshaExpDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                    Certification Document (PDF or Photo)
+                  </label>
+                  <label className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-4 text-center cursor-pointer transition bg-slate-950/50 flex flex-col items-center justify-center">
+                    <Upload className="w-6 h-6 text-slate-400 mb-1.5" />
+                    <span className="text-xs text-slate-300 font-medium truncate max-w-full px-2">
+                      {editSelectedFile
+                        ? editSelectedFile.name
+                        : workerToEdit.fileName
+                        ? `Current: ${workerToEdit.fileName}`
+                        : 'Click to select PDF or image file'}
+                    </span>
+                    <span className="text-[10px] text-slate-500 mt-0.5">
+                      Leave empty to keep existing document
+                    </span>
+                    <input 
+                      type="file"
+                      accept=".pdf,image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          setEditSelectedFile(e.target.files[0]);
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <div className="flex space-x-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setWorkerToEdit(null)}
+                    className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={updatingWorker}
+                    className="w-1/2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-xs transition disabled:opacity-50 shadow-lg shadow-blue-600/20 cursor-pointer"
+                  >
+                    {updatingWorker ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* Modal: Worker Details Breakdown */}
         {workerDetailsModal && (
@@ -854,10 +1075,17 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="mt-6">
+              <div className="mt-6 flex space-x-3">
+                <button
+                  onClick={() => openEditWorkerModal(workerDetailsModal)}
+                  className="w-1/2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer flex items-center justify-center space-x-1.5"
+                >
+                  <Pencil className="w-3.5 h-3.5 shrink-0" />
+                  <span>Edit Certificate</span>
+                </button>
                 <button
                   onClick={() => setWorkerDetailsModal(null)}
-                  className="w-full bg-slate-800 hover:bg-slate-700 text-white font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer"
+                  className="w-1/2 bg-slate-800 hover:bg-slate-700 text-white font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer"
                 >
                   Close Details
                 </button>
