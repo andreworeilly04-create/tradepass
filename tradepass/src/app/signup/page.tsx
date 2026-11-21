@@ -37,7 +37,7 @@ const TIERS = [
     popular: true,
     features: [
       'Up to 25 Workers',
-      'Automated 30, 15, 7, & 1-Day Email Alerts',
+      'Automated 30, 15, 7 Email Alerts',
       'Itemized Compliance Digest Reports',
       'Shareable GC Public Passport Link',
     ],

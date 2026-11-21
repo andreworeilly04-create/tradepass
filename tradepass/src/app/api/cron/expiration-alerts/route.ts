@@ -23,16 +23,31 @@ function parseLocalDate(dateStr: string): Date | null {
   return parsed;
 }
 
-function isStandardTier(userData: FirebaseFirestore.DocumentData): boolean {
+function getAllowedMilestones(userData: FirebaseFirestore.DocumentData): number[] {
   const tier = (
     userData.planTier ||
     userData.subscriptionTier ||
     'Standard Crew'
   )
     .toString()
-    .toLowerCase();
+    .toLowerCase()
+    .trim();
 
-  return tier === 'standard' || tier === 'standard crew';
+  // Multi / Enterprise: 30, 15, 7, and 1-day final urgent alert
+  if (
+    tier.includes('multi') ||
+    tier.includes('enterprise')
+  ) {
+    return [30, 15, 7, 1];
+  }
+
+  // Crew Pro: 30, 15, and 7-day automated reminders
+  if (tier.includes('pro')) {
+    return [30, 15, 7];
+  }
+
+  // Standard / Standard Crew: 30 and 15-day automated reminders
+  return [30, 15];
 }
 
 export async function GET(request: Request) {
@@ -54,7 +69,7 @@ export async function GET(request: Request) {
       const userId = userDoc.id;
       const userEmail = userData.email;
       const companyName = userData.companyName || 'Your Company';
-      const standardOnly = isStandardTier(userData);
+      const allowedMilestones = getAllowedMilestones(userData);
 
       if (!userEmail) continue;
 
@@ -79,6 +94,8 @@ export async function GET(request: Request) {
         const diffTime = expDate.getTime() - today.getTime();
         const daysRemaining = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
+        if (!allowedMilestones.includes(daysRemaining)) return;
+
         const item = {
           name: worker.name,
           cardType: worker.cardType || 'OSHA Certification',
@@ -87,12 +104,8 @@ export async function GET(request: Request) {
 
         if (daysRemaining === 30) expiringWorkers30Days.push(item);
         if (daysRemaining === 15) expiringWorkers15Days.push(item);
-
-        // 7-day and 1-day milestones reserved for Pro and Enterprise tiers
-        if (!standardOnly) {
-          if (daysRemaining === 7) expiringWorkers7Days.push(item);
-          if (daysRemaining === 1) expiringWorkers1Day.push(item);
-        }
+        if (daysRemaining === 7) expiringWorkers7Days.push(item);
+        if (daysRemaining === 1) expiringWorkers1Day.push(item);
       });
 
       const appUrl =
@@ -102,7 +115,8 @@ export async function GET(request: Request) {
       const sendAlertEmail = async (
         workers: any[],
         timeframeText: string,
-        urgencyBadge: string
+        subjectPrefix: string,
+        isUrgent = false
       ) => {
         const listHtml = workers
           .map(
@@ -111,15 +125,23 @@ export async function GET(request: Request) {
           )
           .join('');
 
+        const headingText = isUrgent
+          ? 'Urgent: TradePass Expiration Notice'
+          : 'TradePass Expiration Reminder';
+
+        const introText = isUrgent
+          ? `This is a final reminder that the following worker certification(s) expire in <strong>${timeframeText}</strong>:`
+          : `This is an automated reminder that the following worker certification(s) are scheduled to expire in <strong>${timeframeText}</strong>:`;
+
         const { error } = await resend.emails.send({
           from: FROM_EMAIL,
           to: userEmail,
-          subject: `${urgencyBadge} ${workers.length} worker credential(s) expiring in ${timeframeText}`,
+          subject: `${subjectPrefix} ${workers.length} worker credential(s) expiring in ${timeframeText}`,
           html: `
             <div style="font-family: Arial, sans-serif; color: #0f172a; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-              <h2 style="color: #1e293b; margin-top: 0;">TradePass Compliance Alert</h2>
+              <h2 style="color: #1e293b; margin-top: 0;">${headingText}</h2>
               <p>Hello <strong>${companyName}</strong>,</p>
-              <p>You have worker certifications that reach expiration in <strong>${timeframeText}</strong>:</p>
+              <p>${introText}</p>
               <ul style="background-color: #f8fafc; padding: 16px 24px; border-radius: 6px; border: 1px solid #cbd5e1;">
                 ${listHtml}
               </ul>
@@ -145,31 +167,33 @@ export async function GET(request: Request) {
         await sendAlertEmail(
           expiringWorkers30Days,
           '30 days',
-          '[NOTICE - 30 DAYS]'
+          '[AUTOMATED NOTICE - 30 DAYS]',
+          false
         );
       }
       if (expiringWorkers15Days.length > 0) {
         await sendAlertEmail(
           expiringWorkers15Days,
           '15 days',
-          '[WARNING - 15 DAYS]'
+          '[AUTOMATED REMINDER - 15 DAYS]',
+          false
         );
       }
-      if (!standardOnly) {
-        if (expiringWorkers7Days.length > 0) {
-          await sendAlertEmail(
-            expiringWorkers7Days,
-            '7 days',
-            '[ACTION REQUIRED - 7 DAYS]'
-          );
-        }
-        if (expiringWorkers1Day.length > 0) {
-          await sendAlertEmail(
-            expiringWorkers1Day,
-            '24 HOURS',
-            '[URGENT - 1 DAY]'
-          );
-        }
+      if (expiringWorkers7Days.length > 0) {
+        await sendAlertEmail(
+          expiringWorkers7Days,
+          '7 days',
+          '[REMINDER - 7 DAYS]',
+          false
+        );
+      }
+      if (expiringWorkers1Day.length > 0) {
+        await sendAlertEmail(
+          expiringWorkers1Day,
+          '24 hours',
+          '[URGENT - 1 DAY]',
+          true
+        );
       }
     }
 
