@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -37,7 +36,8 @@ import {
   arrayUnion, 
   arrayRemove 
 } from 'firebase/firestore';
-import { db, auth } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, auth, storage } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
 interface UserProfile {
@@ -59,6 +59,7 @@ interface Worker {
   oshaCertNumber?: string;
   oshaExpDate?: string;
   fileName?: string;
+  fileUrl?: string | null;
   status?: 'Compliant' | 'Warning' | 'Expired';
   docsCount: number;
 }
@@ -91,6 +92,13 @@ function getComplianceStatus(expDateStr?: string): 'Compliant' | 'Warning' | 'Ex
   if (diffDays <= 0) return 'Expired';
   if (diffDays <= 30) return 'Warning';
   return 'Compliant';
+}
+
+async function uploadWorkerCertificateFile(userId: string, file: File): Promise<string> {
+  const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storageRef = ref(storage, `users/${userId}/certificates/${Date.now()}_${safeFileName}`);
+  await uploadBytes(storageRef, file);
+  return getDownloadURL(storageRef);
 }
 
 export default function DashboardPage() {
@@ -311,6 +319,9 @@ export default function DashboardPage() {
         digestText += `   - Credential / Policy Number: ${w.oshaCertNumber || 'N/A'}\n`;
         digestText += `   - Expiration Date: ${formatDateString(w.oshaExpDate)}\n`;
         digestText += `   - Attached Verification Document: ${w.fileName || 'None'}\n`;
+        if (w.fileUrl) {
+          digestText += `   - Document Link: ${w.fileUrl}\n`;
+        }
         digestText += `---------------------------------------------------\n`;
       });
     }
@@ -341,6 +352,11 @@ export default function DashboardPage() {
 
     try {
       setSubmitting(true);
+      let uploadedFileUrl: string | null = null;
+      if (selectedFile) {
+        uploadedFileUrl = await uploadWorkerCertificateFile(user.uid, selectedFile);
+      }
+
       await addDoc(collection(db, 'users', user.uid, 'workers'), {
         name: workerName,
         role: workerRole || 'Technician',
@@ -348,6 +364,7 @@ export default function DashboardPage() {
         oshaCertNumber: oshaCertNumber || 'N/A',
         oshaExpDate: oshaExpDate || '',
         fileName: selectedFile ? selectedFile.name : null,
+        fileUrl: uploadedFileUrl,
         docsCount: selectedFile || oshaCertNumber ? 1 : 0,
         createdAt: serverTimestamp()
       });
@@ -391,9 +408,14 @@ export default function DashboardPage() {
 
     try {
       setUpdatingWorker(true);
-      const updatedFileName = editSelectedFile
-        ? editSelectedFile.name
-        : workerToEdit.fileName || null;
+      let updatedFileName = workerToEdit.fileName || null;
+      let updatedFileUrl = workerToEdit.fileUrl || null;
+
+      if (editSelectedFile) {
+        updatedFileName = editSelectedFile.name;
+        updatedFileUrl = await uploadWorkerCertificateFile(user.uid, editSelectedFile);
+      }
+
       const updatedCertNumber = editOshaCertNumber.trim() || 'N/A';
 
       await updateDoc(doc(db, 'users', user.uid, 'workers', workerToEdit.id), {
@@ -403,6 +425,7 @@ export default function DashboardPage() {
         oshaCertNumber: updatedCertNumber,
         oshaExpDate: editOshaExpDate || '',
         fileName: updatedFileName,
+        fileUrl: updatedFileUrl,
         docsCount: updatedFileName || updatedCertNumber !== 'N/A' ? 1 : 0,
         updatedAt: serverTimestamp(),
       });
@@ -1067,10 +1090,32 @@ export default function DashboardPage() {
 
                   <div>
                     <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Attached Verification Document</span>
-                    <span className="text-xs text-blue-400 flex items-center space-x-1.5 mt-0.5 truncate">
-                      <FileText className="w-3.5 h-3.5 shrink-0" />
-                      <span className="truncate">{workerDetailsModal.fileName || 'No document attached'}</span>
-                    </span>
+                    {workerDetailsModal.fileUrl ? (
+                      <div className="mt-1.5 flex items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2">
+                        <span className="text-xs text-slate-300 flex items-center space-x-1.5 min-w-0">
+                          <FileText className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          <span className="truncate">{workerDetailsModal.fileName || 'Certificate Document'}</span>
+                        </span>
+                        <a
+                          href={workerDetailsModal.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center space-x-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition shrink-0"
+                        >
+                          <span>View Document</span>
+                          <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                        </a>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400 flex items-center space-x-1.5 mt-1 truncate">
+                        <FileText className="w-3.5 h-3.5 shrink-0 text-slate-500" />
+                        <span className="truncate">
+                          {workerDetailsModal.fileName
+                            ? `${workerDetailsModal.fileName} (no viewable file uploaded)`
+                            : 'No document attached'}
+                        </span>
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
