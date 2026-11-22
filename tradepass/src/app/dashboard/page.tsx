@@ -1165,7 +1165,7 @@ export default function DashboardPage() {
                     type="date" 
                     value={editOshaExpDate}
                     onChange={(e) => setEditOshaExpDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white [color-scheme:dark] focus:outline-none focus:border-blue-500"
                   />
                 </div>
 
@@ -1493,7 +1493,7 @@ export default function DashboardPage() {
                     type="date" 
                     value={oshaExpDate}
                     onChange={(e) => setOshaExpDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white [color-scheme:dark] focus:outline-none focus:border-blue-500"
                   />
                 </div>
 
