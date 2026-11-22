@@ -448,7 +448,7 @@ function SignupFormContent() {
               <button
                 type="submit"
                 disabled={loading || (isLoggedInUser && profileLoading)}
-                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition disabled:opacity-50 mt-4 shadow-lg shadow-blue-900/20"
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm transition disabled:opacity-50 mt-4 shadow-lg shadow-blue-900/20 cursor-pointer"
               >
                 {loading
                   ? 'Processing...'
@@ -463,7 +463,7 @@ function SignupFormContent() {
             <button
               type="button"
               onClick={handleBackFromCheckout}
-              className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-400 hover:text-white transition mb-4"
+              className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-400 hover:text-white transition mb-4 cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Change Plan Tier</span>
