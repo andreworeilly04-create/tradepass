@@ -8,19 +8,86 @@ const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL ||
   'TradePass Compliance <onboarding@resend.dev>';
 
-function parseLocalDate(dateStr: string): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
-  if (match) {
-    const year = Number(match[1]);
-    const month = Number(match[2]) - 1;
-    const day = Number(match[3]);
+const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'America/New_York';
+
+function getSafeTimeZone(userData: FirebaseFirestore.DocumentData): string {
+  const candidate =
+    typeof userData.timeZone === 'string' && userData.timeZone.trim()
+      ? userData.timeZone.trim()
+      : typeof userData.timezone === 'string' && userData.timezone.trim()
+      ? userData.timezone.trim()
+      : DEFAULT_TIMEZONE;
+
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: candidate });
+    return candidate;
+  } catch {
+    return 'America/New_York';
+  }
+}
+
+function getStartOfDayInTimeZone(date: Date, timeZone: string): Date {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
+  const parts = formatter.formatToParts(date);
+  const year = Number(parts.find((p) => p.type === 'year')?.value);
+  const month = Number(parts.find((p) => p.type === 'month')?.value);
+  const day = Number(parts.find((p) => p.type === 'day')?.value);
+
+  return new Date(year, month - 1, day, 0, 0, 0, 0);
+}
+
+function normalizeDateInput(raw: unknown): string | Date | null {
+  if (!raw) return null;
+  if (
+    typeof raw === 'object' &&
+    raw !== null &&
+    'toDate' in raw &&
+    typeof (raw as { toDate?: unknown }).toDate === 'function'
+  ) {
+    return (raw as { toDate: () => Date }).toDate();
+  }
+  if (raw instanceof Date || typeof raw === 'string') {
+    return raw;
+  }
+  return String(raw);
+}
+
+function parseLocalDate(rawInput: unknown, timeZone: string): Date | null {
+  const normalized = normalizeDateInput(rawInput);
+  if (!normalized) return null;
+
+  if (normalized instanceof Date) {
+    if (Number.isNaN(normalized.getTime())) return null;
+    // If stored as a Date/Timestamp, extract calendar day in the user's timezone
+    return getStartOfDayInTimeZone(normalized, timeZone);
+  }
+
+  const trimmed = normalized.trim();
+  const isoDateMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+  if (isoDateMatch) {
+    const year = Number(isoDateMatch[1]);
+    const month = Number(isoDateMatch[2]) - 1;
+    const day = Number(isoDateMatch[3]);
     return new Date(year, month, day, 0, 0, 0, 0);
   }
 
-  const parsed = new Date(dateStr);
+  const slashDateMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
+  if (slashDateMatch) {
+    const month = Number(slashDateMatch[1]) - 1;
+    const day = Number(slashDateMatch[2]);
+    const year = Number(slashDateMatch[3]);
+    return new Date(year, month, day, 0, 0, 0, 0);
+  }
+
+  const parsed = new Date(trimmed);
   if (Number.isNaN(parsed.getTime())) return null;
-  parsed.setHours(0, 0, 0, 0);
-  return parsed;
+  return getStartOfDayInTimeZone(parsed, timeZone);
 }
 
 function getAllowedMilestones(userData: FirebaseFirestore.DocumentData): number[] {
@@ -33,22 +100,18 @@ function getAllowedMilestones(userData: FirebaseFirestore.DocumentData): number[
     .toLowerCase()
     .trim();
 
-  // Multi / Enterprise: 30, 15, 7, and 1-day final urgent alert
   if (tier.includes('multi') || tier.includes('enterprise')) {
     return [30, 15, 7, 1];
   }
 
-  // Crew Pro: 30, 15, and 7-day automated reminders
   if (tier.includes('pro')) {
     return [30, 15, 7];
   }
 
-  // Standard / Standard Crew: 30 and 15-day automated reminders
   return [30, 15];
 }
 
 export async function GET(request: Request) {
-  // 1. Verify Vercel Cron Secret Header
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${process.env.CRON_SECRET_KEY}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -58,14 +121,16 @@ export async function GET(request: Request) {
     const usersSnapshot = await adminDb.collection('users').get();
     let emailsSent = 0;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const msPerDay = 1000 * 60 * 60 * 24;
 
     for (const userDoc of usersSnapshot.docs) {
       const userData = userDoc.data();
       const userId = userDoc.id;
       const userEmail = userData.email;
       const companyName = userData.companyName || 'Your Company';
+      const userTimeZone = getSafeTimeZone(userData);
+      const today = getStartOfDayInTimeZone(now, userTimeZone);
       const allowedMilestones = getAllowedMilestones(userData);
       const hasPublicPassport = allowedMilestones.includes(7);
 
@@ -77,27 +142,43 @@ export async function GET(request: Request) {
         .collection('workers')
         .get();
 
-      const expiringWorkers30Days: any[] = [];
-      const expiringWorkers15Days: any[] = [];
-      const expiringWorkers7Days: any[] = [];
-      const expiringWorkers1Day: any[] = [];
+      const expiringWorkers30Days: Array<{
+        name: string;
+        cardType: string;
+        expDate: string;
+      }> = [];
+      const expiringWorkers15Days: Array<{
+        name: string;
+        cardType: string;
+        expDate: string;
+      }> = [];
+      const expiringWorkers7Days: Array<{
+        name: string;
+        cardType: string;
+        expDate: string;
+      }> = [];
+      const expiringWorkers1Day: Array<{
+        name: string;
+        cardType: string;
+        expDate: string;
+      }> = [];
 
       workersSnapshot.forEach((workerDoc) => {
         const worker = workerDoc.data();
         if (!worker.oshaExpDate) return;
 
-        const expDate = parseLocalDate(String(worker.oshaExpDate));
+        const expDate = parseLocalDate(worker.oshaExpDate, userTimeZone);
         if (!expDate) return;
 
         const diffTime = expDate.getTime() - today.getTime();
-        const daysRemaining = Math.round(diffTime / (1000 * 60 * 60 * 24));
+        const daysRemaining = Math.round(diffTime / msPerDay);
 
         if (!allowedMilestones.includes(daysRemaining)) return;
 
         const item = {
           name: worker.name,
           cardType: worker.cardType || 'OSHA Certification',
-          expDate: worker.oshaExpDate,
+          expDate: String(worker.oshaExpDate),
         };
 
         if (daysRemaining === 30) expiringWorkers30Days.push(item);
@@ -112,7 +193,7 @@ export async function GET(request: Request) {
       const passportUrl = `${appUrl}/passport/${userId}`;
 
       const sendAlertEmail = async (
-        workers: any[],
+        workers: Array<{ name: string; cardType: string; expDate: string }>,
         timeframeText: string,
         subjectPrefix: string,
         isUrgent = false
@@ -166,7 +247,6 @@ export async function GET(request: Request) {
         emailsSent++;
       };
 
-      // Dispatch milestone emails based on tier access
       if (expiringWorkers30Days.length > 0) {
         await sendAlertEmail(
           expiringWorkers30Days,

@@ -40,6 +40,7 @@ import { db, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
 const MAX_DATA_IMAGE_BYTES = 500 * 1024; // ~500 KB to stay safely under Firestore's 1 MiB document limit
+const DEFAULT_TIME_ZONE = 'America/New_York';
 
 interface UserProfile {
   companyName?: string;
@@ -50,6 +51,8 @@ interface UserProfile {
   companyLogoUrl?: string;
   brandColor?: string;
   foremanEmails?: string[];
+  timeZone?: string;
+  timezone?: string;
 }
 
 interface Worker {
@@ -63,6 +66,48 @@ interface Worker {
   fileUrl?: string | null;
   status?: 'Compliant' | 'Warning' | 'Expired';
   docsCount: number;
+}
+
+function getSafeTimeZone(timeZone?: string | null): string {
+  const candidate =
+    typeof timeZone === 'string' && timeZone.trim()
+      ? timeZone.trim()
+      : DEFAULT_TIME_ZONE;
+
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: candidate });
+    return candidate;
+  } catch {
+    return DEFAULT_TIME_ZONE;
+  }
+}
+
+function getStartOfDayInTimeZone(date: Date, timeZone: string): Date {
+  const safeTz = getSafeTimeZone(timeZone);
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: safeTz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
+  const parts = formatter.formatToParts(date);
+  const year = Number(parts.find((p) => p.type === 'year')?.value);
+  const month = Number(parts.find((p) => p.type === 'month')?.value);
+  const day = Number(parts.find((p) => p.type === 'day')?.value);
+
+  return new Date(year, month - 1, day, 0, 0, 0, 0);
+}
+
+function getTodayFormattedInTimeZone(timeZone: string): string {
+  const safeTz = getSafeTimeZone(timeZone);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: safeTz,
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  return formatter.format(new Date());
 }
 
 function getSafeCertificateUrl(rawUrl?: string | null): string | null {
@@ -139,7 +184,10 @@ function formatDateString(dateStr?: string): string {
   return `${parseInt(month, 10)}/${parseInt(day, 10)}/${year}`;
 }
 
-function getComplianceStatus(expDateStr?: string): 'Compliant' | 'Warning' | 'Expired' {
+function getComplianceStatus(
+  expDateStr?: string,
+  timeZone: string = DEFAULT_TIME_ZONE
+): 'Compliant' | 'Warning' | 'Expired' {
   if (!expDateStr) return 'Compliant';
 
   const parts = expDateStr.split('-');
@@ -149,9 +197,12 @@ function getComplianceStatus(expDateStr?: string): 'Compliant' | 'Warning' | 'Ex
   const expMonth = parseInt(parts[1], 10) - 1;
   const expDay = parseInt(parts[2], 10);
 
-  const expDate = new Date(expYear, expMonth, expDay);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (Number.isNaN(expYear) || Number.isNaN(expMonth) || Number.isNaN(expDay)) {
+    return 'Compliant';
+  }
+
+  const expDate = new Date(expYear, expMonth, expDay, 0, 0, 0, 0);
+  const today = getStartOfDayInTimeZone(new Date(), timeZone);
 
   const diffTime = expDate.getTime() - today.getTime();
   const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
@@ -205,6 +256,8 @@ export default function DashboardPage() {
   const [brandingLogoUrl, setBrandingLogoUrl] = useState('');
   const [brandingColor, setBrandingColor] = useState('#0ea5e9');
 
+  const activeTimeZone = getSafeTimeZone(profile?.timeZone || profile?.timezone);
+
   useEffect(() => {
     if (!loading && !user) {
       router.push('/login');
@@ -235,7 +288,7 @@ export default function DashboardPage() {
       const workerList: Worker[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        const calculatedStatus = getComplianceStatus(data.oshaExpDate);
+        const calculatedStatus = getComplianceStatus(data.oshaExpDate, activeTimeZone);
         workerList.push({ 
           id: docSnap.id, 
           ...data,
@@ -246,7 +299,7 @@ export default function DashboardPage() {
     });
 
     return () => unsubscribeWorkers();
-  }, [user]);
+  }, [user, activeTimeZone]);
 
   const companyName = profile?.companyName || user?.displayName || 'My Company';
   
@@ -346,15 +399,14 @@ export default function DashboardPage() {
   };
 
   const handleDownloadDigest = () => {
-    const today = new Date();
-    const dateStr = `${today.getMonth() + 1}/${today.getDate()}/${today.getFullYear()}`;
+    const dateStr = getTodayFormattedInTimeZone(activeTimeZone);
 
     let digestText = `===================================================\n`;
     digestText += `         TRADEPASS COMPLIANCE DIGEST REPORT        \n`;
     digestText += `===================================================\n`;
     digestText += `Company: ${companyName}\n`;
     digestText += `Plan Tier: ${planTierDisplay}\n`;
-    digestText += `Generated Date: ${dateStr}\n`;
+    digestText += `Generated Date: ${dateStr} (${activeTimeZone})\n`;
     digestText += `Total Active Workers: ${totalActive} / ${isEnterpriseTier ? 'Unlimited' : maxWorkers}\n`;
     digestText += `===================================================\n\n`;
 
@@ -709,7 +761,7 @@ export default function DashboardPage() {
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5 truncate">
-                Compliance Command Center • Job-site access &amp; worker certifications.
+                Compliance Command Center • Job-site access &amp; worker certifications ({activeTimeZone}).
               </p>
             </div>
           </div>
