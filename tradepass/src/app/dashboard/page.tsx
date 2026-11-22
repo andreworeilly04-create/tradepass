@@ -93,6 +93,19 @@ function isImageCertificate(url: string): boolean {
   );
 }
 
+async function openCertificateInNewTab(safeUrl: string): Promise<void> {
+  if (safeUrl.startsWith('data:')) {
+    const response = await fetch(safeUrl);
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    window.open(objectUrl, '_blank', 'noopener,noreferrer');
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    return;
+  }
+
+  window.open(safeUrl, '_blank', 'noopener,noreferrer');
+}
+
 function readImageFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith('image/')) {
@@ -427,6 +440,7 @@ export default function DashboardPage() {
       setEditCertificateDataUrl(dataUrl);
     } catch (err: any) {
       setEditSelectedFile(null);
+      setEditCertificateDataUrl(null);
       setEditFormError(err.message || 'Could not process image.');
     }
   };
@@ -1240,15 +1254,14 @@ export default function DashboardPage() {
                             <FileText className="w-3.5 h-3.5 text-blue-400 shrink-0" />
                             <span className="truncate">{workerDetailsModal.fileName || 'Certificate Document'}</span>
                           </span>
-                          <a
-                            href={detailsSafeUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center space-x-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition shrink-0"
+                          <button
+                            type="button"
+                            onClick={() => openCertificateInNewTab(detailsSafeUrl)}
+                            className="inline-flex items-center space-x-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition shrink-0 cursor-pointer"
                           >
                             <span>View Document</span>
                             <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                          </a>
+                          </button>
                         </div>
 
                         {isImageCertificate(detailsSafeUrl) && (
