@@ -36,8 +36,7 @@ import {
   arrayUnion, 
   arrayRemove 
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, auth, storage } from '@/lib/firebase';
+import { db, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
 interface UserProfile {
@@ -62,6 +61,34 @@ interface Worker {
   fileUrl?: string | null;
   status?: 'Compliant' | 'Warning' | 'Expired';
   docsCount: number;
+}
+
+function getSafeCertificateUrl(rawUrl?: string | null): string | null {
+  if (!rawUrl) return null;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+
+  if (
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('data:image/') ||
+    trimmed.startsWith('data:application/pdf')
+  ) {
+    return trimmed;
+  }
+
+  if (!trimmed.startsWith('blob:') && !trimmed.startsWith('/')) {
+    return `https://${trimmed}`;
+  }
+
+  return null;
+}
+
+function isImageCertificate(url: string): boolean {
+  return (
+    url.startsWith('data:image/') ||
+    /\.(png|jpe?g|webp|gif)(\?|$)/i.test(url)
+  );
 }
 
 function formatDateString(dateStr?: string): string {
@@ -92,13 +119,6 @@ function getComplianceStatus(expDateStr?: string): 'Compliant' | 'Warning' | 'Ex
   if (diffDays <= 0) return 'Expired';
   if (diffDays <= 30) return 'Warning';
   return 'Compliant';
-}
-
-async function uploadWorkerCertificateFile(userId: string, file: File): Promise<string> {
-  const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storageRef = ref(storage, `users/${userId}/certificates/${Date.now()}_${safeFileName}`);
-  await uploadBytes(storageRef, file);
-  return getDownloadURL(storageRef);
 }
 
 export default function DashboardPage() {
@@ -212,7 +232,6 @@ export default function DashboardPage() {
   // SUBSCRIPTION ACCESS GATE: Only active subscriptions and valid trials get dashboard access.
   const subscriptionStatus = profile?.subscriptionStatus;
 
-  // 1. If profile is still loading, show a loading screen instead of flashing the paywall or leaking access
   if (!profile) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 font-sans">
@@ -221,8 +240,6 @@ export default function DashboardPage() {
     );
   }
 
-  // 2. Grant access only to active subscriptions or valid trials.
-  // Incomplete checkouts and past-due subscriptions must complete payment before accessing the dashboard.
   const isSubscriptionActive =
     subscriptionStatus === 'active' ||
     subscriptionStatus === 'trialing';
@@ -313,14 +330,15 @@ export default function DashboardPage() {
       digestText += `No worker profiles registered in roster.\n`;
     } else {
       workers.forEach((w, index) => {
+        const safeUrl = getSafeCertificateUrl(w.fileUrl);
         digestText += `${index + 1}. WORKER: ${w.name.toUpperCase()}\n`;
         digestText += `   - Trade & Role: ${w.trade || 'General'} — ${w.role}\n`;
         digestText += `   - Compliance Status: [${w.status?.toUpperCase()}]\n`;
         digestText += `   - Credential / Policy Number: ${w.oshaCertNumber || 'N/A'}\n`;
         digestText += `   - Expiration Date: ${formatDateString(w.oshaExpDate)}\n`;
         digestText += `   - Attached Verification Document: ${w.fileName || 'None'}\n`;
-        if (w.fileUrl) {
-          digestText += `   - Document Link: ${w.fileUrl}\n`;
+        if (safeUrl) {
+          digestText += `   - Document Link: ${safeUrl}\n`;
         }
         digestText += `---------------------------------------------------\n`;
       });
@@ -352,10 +370,6 @@ export default function DashboardPage() {
 
     try {
       setSubmitting(true);
-      let uploadedFileUrl: string | null = null;
-      if (selectedFile) {
-        uploadedFileUrl = await uploadWorkerCertificateFile(user.uid, selectedFile);
-      }
 
       await addDoc(collection(db, 'users', user.uid, 'workers'), {
         name: workerName,
@@ -364,7 +378,7 @@ export default function DashboardPage() {
         oshaCertNumber: oshaCertNumber || 'N/A',
         oshaExpDate: oshaExpDate || '',
         fileName: selectedFile ? selectedFile.name : null,
-        fileUrl: uploadedFileUrl,
+        fileUrl: null,
         docsCount: selectedFile || oshaCertNumber ? 1 : 0,
         createdAt: serverTimestamp()
       });
@@ -408,13 +422,12 @@ export default function DashboardPage() {
 
     try {
       setUpdatingWorker(true);
-      let updatedFileName = workerToEdit.fileName || null;
-      let updatedFileUrl = workerToEdit.fileUrl || null;
-
-      if (editSelectedFile) {
-        updatedFileName = editSelectedFile.name;
-        updatedFileUrl = await uploadWorkerCertificateFile(user.uid, editSelectedFile);
-      }
+      const updatedFileName = editSelectedFile
+        ? editSelectedFile.name
+        : workerToEdit.fileName || null;
+      const updatedFileUrl = editSelectedFile
+        ? null
+        : getSafeCertificateUrl(workerToEdit.fileUrl);
 
       const updatedCertNumber = editOshaCertNumber.trim() || 'N/A';
 
@@ -506,6 +519,10 @@ export default function DashboardPage() {
   const compliantCount = workers.filter(w => w.status === 'Compliant').length;
   const warningCount = workers.filter(w => w.status === 'Warning').length;
   const expiredCount = workers.filter(w => w.status === 'Expired').length;
+
+  const detailsSafeUrl = workerDetailsModal
+    ? getSafeCertificateUrl(workerDetailsModal.fileUrl)
+    : null;
 
   if (loading) {
     return (
@@ -1036,7 +1053,7 @@ export default function DashboardPage() {
         {/* Modal: Worker Details Breakdown */}
         {workerDetailsModal && (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full mx-4 shadow-2xl">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
                 <div className="flex items-center space-x-2 text-blue-400">
                   <FileCheck className="w-5 h-5 shrink-0" />
@@ -1090,28 +1107,38 @@ export default function DashboardPage() {
 
                   <div>
                     <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Attached Verification Document</span>
-                    {workerDetailsModal.fileUrl ? (
-                      <div className="mt-1.5 flex items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2">
-                        <span className="text-xs text-slate-300 flex items-center space-x-1.5 min-w-0">
-                          <FileText className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                          <span className="truncate">{workerDetailsModal.fileName || 'Certificate Document'}</span>
-                        </span>
-                        <a
-                          href={workerDetailsModal.fileUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center space-x-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition shrink-0"
-                        >
-                          <span>View Document</span>
-                          <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                        </a>
+                    {detailsSafeUrl ? (
+                      <div className="mt-1.5 space-y-2.5 bg-slate-900 border border-slate-800 rounded-xl p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-slate-300 flex items-center space-x-1.5 min-w-0">
+                            <FileText className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                            <span className="truncate">{workerDetailsModal.fileName || 'Certificate Document'}</span>
+                          </span>
+                          <a
+                            href={detailsSafeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center space-x-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition shrink-0"
+                          >
+                            <span>View Document</span>
+                            <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                          </a>
+                        </div>
+
+                        {isImageCertificate(detailsSafeUrl) && (
+                          <img
+                            src={detailsSafeUrl}
+                            alt={workerDetailsModal.fileName || `${workerDetailsModal.name} certificate`}
+                            className="max-h-48 w-full rounded-lg border border-slate-800 bg-slate-950 object-contain"
+                          />
+                        )}
                       </div>
                     ) : (
                       <span className="text-xs text-slate-400 flex items-center space-x-1.5 mt-1 truncate">
                         <FileText className="w-3.5 h-3.5 shrink-0 text-slate-500" />
                         <span className="truncate">
                           {workerDetailsModal.fileName
-                            ? `${workerDetailsModal.fileName} (no viewable file uploaded)`
+                            ? `${workerDetailsModal.fileName} (no viewable link saved)`
                             : 'No document attached'}
                         </span>
                       </span>
