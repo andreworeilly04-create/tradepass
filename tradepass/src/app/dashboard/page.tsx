@@ -39,6 +39,8 @@ import {
 import { db, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
+const MAX_DATA_IMAGE_BYTES = 500 * 1024; // ~500 KB to stay safely under Firestore's 1 MiB document limit
+
 interface UserProfile {
   companyName?: string;
   planTier?: string;
@@ -89,6 +91,31 @@ function isImageCertificate(url: string): boolean {
     url.startsWith('data:image/') ||
     /\.(png|jpe?g|webp|gif)(\?|$)/i.test(url)
   );
+}
+
+function readImageFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      reject(new Error('Only image files or pasted screenshots can be saved directly without cloud storage.'));
+      return;
+    }
+
+    if (file.size > MAX_DATA_IMAGE_BYTES) {
+      reject(new Error('Image is too large for Firestore (max ~500 KB). Please crop, resize, or take a smaller screenshot.'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Could not read image data.'));
+      }
+    };
+    reader.onerror = () => reject(new Error('Failed to read image from clipboard or file.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function formatDateString(dateStr?: string): string {
@@ -146,6 +173,7 @@ export default function DashboardPage() {
   const [oshaCertNumber, setOshaCertNumber] = useState('');
   const [oshaExpDate, setOshaExpDate] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [certificateDataUrl, setCertificateDataUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -156,6 +184,7 @@ export default function DashboardPage() {
   const [editOshaCertNumber, setEditOshaCertNumber] = useState('');
   const [editOshaExpDate, setEditOshaExpDate] = useState('');
   const [editSelectedFile, setEditSelectedFile] = useState<File | null>(null);
+  const [editCertificateDataUrl, setEditCertificateDataUrl] = useState<string | null>(null);
   const [updatingWorker, setUpdatingWorker] = useState(false);
   const [editFormError, setEditFormError] = useState('');
 
@@ -229,7 +258,6 @@ export default function DashboardPage() {
   const isAtCapacity = !isEnterpriseTier && totalActive >= maxWorkers;
   const brandColor = profile?.brandColor || '#0ea5e9';
 
-  // SUBSCRIPTION ACCESS GATE: Only active subscriptions and valid trials get dashboard access.
   const subscriptionStatus = profile?.subscriptionStatus;
 
   if (!profile) {
@@ -337,8 +365,10 @@ export default function DashboardPage() {
         digestText += `   - Credential / Policy Number: ${w.oshaCertNumber || 'N/A'}\n`;
         digestText += `   - Expiration Date: ${formatDateString(w.oshaExpDate)}\n`;
         digestText += `   - Attached Verification Document: ${w.fileName || 'None'}\n`;
-        if (safeUrl) {
+        if (safeUrl && !safeUrl.startsWith('data:')) {
           digestText += `   - Document Link: ${safeUrl}\n`;
+        } else if (safeUrl?.startsWith('data:image/')) {
+          digestText += `   - Document Link: [Embedded Screenshot Image]\n`;
         }
         digestText += `---------------------------------------------------\n`;
       });
@@ -357,6 +387,69 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
   };
 
+  const handleAddImageSelect = async (file: File) => {
+    setFormError('');
+    try {
+      const dataUrl = await readImageFileAsDataUrl(file);
+      setSelectedFile(file);
+      setCertificateDataUrl(dataUrl);
+    } catch (err: any) {
+      setSelectedFile(null);
+      setCertificateDataUrl(null);
+      setFormError(err.message || 'Could not process image.');
+    }
+  };
+
+  const handleAddPaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (item.type && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          const generatedName = `pasted-certificate-${Date.now()}.${item.type.split('/')[1] || 'png'}`;
+          const namedFile = new File([file], generatedName, { type: file.type });
+          await handleAddImageSelect(namedFile);
+          return;
+        }
+      }
+    }
+  };
+
+  const handleEditImageSelect = async (file: File) => {
+    setEditFormError('');
+    try {
+      const dataUrl = await readImageFileAsDataUrl(file);
+      setEditSelectedFile(file);
+      setEditCertificateDataUrl(dataUrl);
+    } catch (err: any) {
+      setEditSelectedFile(null);
+      setEditFormError(err.message || 'Could not process image.');
+    }
+  };
+
+  const handleEditPaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (item.type && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          e.preventDefault();
+          const generatedName = `pasted-certificate-${Date.now()}.${item.type.split('/')[1] || 'png'}`;
+          const namedFile = new File([file], generatedName, { type: file.type });
+          await handleEditImageSelect(namedFile);
+          return;
+        }
+      }
+    }
+  };
+
   const handleAddWorker = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
@@ -371,15 +464,20 @@ export default function DashboardPage() {
     try {
       setSubmitting(true);
 
+      const savedFileUrl = getSafeCertificateUrl(certificateDataUrl);
+      const savedFileName = savedFileUrl
+        ? (selectedFile?.name || 'certificate-screenshot.png')
+        : null;
+
       await addDoc(collection(db, 'users', user.uid, 'workers'), {
         name: workerName,
         role: workerRole || 'Technician',
         trade: workerTrade || 'General',
         oshaCertNumber: oshaCertNumber || 'N/A',
         oshaExpDate: oshaExpDate || '',
-        fileName: selectedFile ? selectedFile.name : null,
-        fileUrl: null,
-        docsCount: selectedFile || oshaCertNumber ? 1 : 0,
+        fileName: savedFileName,
+        fileUrl: savedFileUrl,
+        docsCount: savedFileUrl || oshaCertNumber ? 1 : 0,
         createdAt: serverTimestamp()
       });
 
@@ -389,6 +487,7 @@ export default function DashboardPage() {
       setOshaCertNumber('');
       setOshaExpDate('');
       setSelectedFile(null);
+      setCertificateDataUrl(null);
       setShowUploadModal(false);
     } catch (err: any) {
       console.error("Error adding worker:", err);
@@ -412,6 +511,7 @@ export default function DashboardPage() {
     );
     setEditOshaExpDate(worker.oshaExpDate || '');
     setEditSelectedFile(null);
+    setEditCertificateDataUrl(getSafeCertificateUrl(worker.fileUrl));
   };
 
   const handleUpdateWorker = async (e: React.FormEvent) => {
@@ -422,12 +522,12 @@ export default function DashboardPage() {
 
     try {
       setUpdatingWorker(true);
+      const updatedFileUrl = getSafeCertificateUrl(editCertificateDataUrl);
       const updatedFileName = editSelectedFile
         ? editSelectedFile.name
-        : workerToEdit.fileName || null;
-      const updatedFileUrl = editSelectedFile
-        ? null
-        : getSafeCertificateUrl(workerToEdit.fileUrl);
+        : updatedFileUrl
+        ? (workerToEdit.fileName || 'certificate-screenshot.png')
+        : null;
 
       const updatedCertNumber = editOshaCertNumber.trim() || 'N/A';
 
@@ -445,6 +545,7 @@ export default function DashboardPage() {
 
       setWorkerToEdit(null);
       setEditSelectedFile(null);
+      setEditCertificateDataUrl(null);
     } catch (err: any) {
       console.error('Error updating certificate:', err);
       setEditFormError(err.message || 'Failed to update certificate.');
@@ -532,7 +633,6 @@ export default function DashboardPage() {
     );
   }
 
-  // SUBSCRIPTION GATE VIEW: If not active and not canceling, show subscription required paywall
   if (!isSubscriptionActive) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center py-12 px-6 font-sans">
@@ -902,7 +1002,10 @@ export default function DashboardPage() {
 
         {/* Modal: Edit Worker Certificate */}
         {workerToEdit && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div
+            onPaste={handleEditPaste}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          >
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
               <header className="flex justify-between items-center mb-4">
                 <div className="flex items-center space-x-2 text-amber-400">
@@ -1002,7 +1105,7 @@ export default function DashboardPage() {
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Certification Document (PDF or Photo)
+                    Paste Screenshot (Ctrl+V / Cmd+V) or Select Image
                   </label>
                   <label className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-4 text-center cursor-pointer transition bg-slate-950/50 flex flex-col items-center justify-center">
                     <Upload className="w-6 h-6 text-slate-400 mb-1.5" />
@@ -1011,22 +1114,45 @@ export default function DashboardPage() {
                         ? editSelectedFile.name
                         : workerToEdit.fileName
                         ? `Current: ${workerToEdit.fileName}`
-                        : 'Click to select PDF or image file'}
+                        : 'Paste a screenshot here or click to select image'}
                     </span>
                     <span className="text-[10px] text-slate-500 mt-0.5">
-                      Leave empty to keep existing document
+                      Small images saved directly in Firestore (~500 KB max)
                     </span>
                     <input 
                       type="file"
-                      accept=".pdf,image/*"
+                      accept="image/*"
                       className="hidden"
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
-                          setEditSelectedFile(e.target.files[0]);
+                          handleEditImageSelect(e.target.files[0]);
                         }
                       }}
                     />
                   </label>
+
+                  {editCertificateDataUrl && isImageCertificate(editCertificateDataUrl) && (
+                    <div className="mt-2.5 rounded-xl border border-slate-800 bg-slate-950 p-2.5 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span>Screenshot Preview</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditSelectedFile(null);
+                            setEditCertificateDataUrl(null);
+                          }}
+                          className="text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <img
+                        src={editCertificateDataUrl}
+                        alt="Certificate preview"
+                        className="max-h-40 w-full rounded-lg object-contain bg-slate-900"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex space-x-3 pt-1">
@@ -1208,7 +1334,10 @@ export default function DashboardPage() {
 
         {/* Modal: Add Worker Profile */}
         {showUploadModal && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div
+            onPaste={handleAddPaste}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          >
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
               <header className="flex justify-between items-center mb-4">
                 <h3 className="text-base sm:text-lg font-bold text-white">Add Crew Worker Profile</h3>
@@ -1305,25 +1434,48 @@ export default function DashboardPage() {
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Certification Document (PDF or Photo)
+                    Paste Screenshot (Ctrl+V / Cmd+V) or Select Image
                   </label>
                   <label className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-4 text-center cursor-pointer transition bg-slate-950/50 flex flex-col items-center justify-center">
                     <Upload className="w-6 h-6 text-slate-400 mb-1.5" />
                     <span className="text-xs text-slate-300 font-medium truncate max-w-full px-2">
-                      {selectedFile ? selectedFile.name : 'Click to select PDF or image file'}
+                      {selectedFile ? selectedFile.name : 'Paste a screenshot (Ctrl+V) or click to select image'}
                     </span>
-                    <span className="text-[10px] text-slate-500 mt-0.5">OSHA Card, Trade License, or Insurance Binder</span>
+                    <span className="text-[10px] text-slate-500 mt-0.5">OSHA Card, Trade License, or Insurance Binder (~500 KB max)</span>
                     <input 
                       type="file"
-                      accept=".pdf,image/*"
+                      accept="image/*"
                       className="hidden"
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
-                          setSelectedFile(e.target.files[0]);
+                          handleAddImageSelect(e.target.files[0]);
                         }
                       }}
                     />
                   </label>
+
+                  {certificateDataUrl && isImageCertificate(certificateDataUrl) && (
+                    <div className="mt-2.5 rounded-xl border border-slate-800 bg-slate-950 p-2.5 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span>Screenshot Preview</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedFile(null);
+                            setCertificateDataUrl(null);
+                          }}
+                          className="text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <img
+                        src={certificateDataUrl}
+                        alt="Certificate preview"
+                        className="max-h-40 w-full rounded-lg object-contain bg-slate-900"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <button 
