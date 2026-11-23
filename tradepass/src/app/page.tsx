@@ -197,7 +197,7 @@ export default function HomePage() {
                 </li>
                 <li className="flex items-start space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                  <span>Automated 30, 15, 7 Email Alerts</span>
+                  <span>Automated 30, 15 & 7-day Email Alerts</span>
                 </li>
                 <li className="flex items-start space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
