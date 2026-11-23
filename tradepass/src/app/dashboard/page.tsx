@@ -761,7 +761,7 @@ export default function DashboardPage() {
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5 truncate">
-                Compliance Command Center • Job-site access &amp; worker certifications ({activeTimeZone}).
+                Compliance Command Center • Job-site access &amp; worker certifications.
               </p>
             </div>
           </div>
