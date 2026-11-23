@@ -908,7 +908,7 @@ export default function DashboardPage() {
               {totalActive} <span className="text-lg text-slate-500 font-normal">/ {isEnterpriseTier ? '∞' : maxWorkers}</span>
             </div>
             <span className="text-xs text-slate-500 mt-1 block">
-              {isEnterpriseTier ? 'Priority 30, 15, 7, & 1-Day Urgent Alerts' : isStandardTier ? 'Automated 30 & 15-Day Alerts' : 'Automated 30, 15 & 7-Day Alerts'}
+              {isEnterpriseTier ? 'Priority 30, 15, 7, & 1-Day Urgent Alerts' : isStandardTier ? 'Automated 30 & 15-Day Alerts' : 'Automated 30, 15, & 7-Day Alerts'}
             </span>
           </article>
 
