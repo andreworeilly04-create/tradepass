@@ -19,6 +19,7 @@ export default function Footer() {
   if (isAuthPage) return null;
 
   const isHomePage = pathname === '/';
+  const isDashboard = pathname === '/dashboard';
   const currentYear = new Date().getFullYear();
 
   const handleSignOut = async () => {
@@ -75,24 +76,28 @@ export default function Footer() {
 
         {/* Dynamic Navigation Links */}
         <nav className="flex flex-wrap justify-center gap-6 font-medium items-center" aria-label="Footer Navigation">
-          {isHomePage ? (
-            <a href="#how-it-works" className="hover:text-white transition">
-              How It Works
-            </a>
-          ) : (
-            <Link href="/#how-it-works" className="hover:text-white transition">
-              How It Works
-            </Link>
-          )}
+          {!isDashboard && (
+            <>
+              {isHomePage ? (
+                <a href="#how-it-works" className="hover:text-white transition">
+                  How It Works
+                </a>
+              ) : (
+                <Link href="/#how-it-works" className="hover:text-white transition">
+                  How It Works
+                </Link>
+              )}
 
-          {isHomePage ? (
-            <a href="#pricing" className="hover:text-white transition">
-              Pricing
-            </a>
-          ) : (
-            <Link href="/#pricing" className="hover:text-white transition">
-              Pricing
-            </Link>
+              {isHomePage ? (
+                <a href="#pricing" className="hover:text-white transition">
+                  Pricing
+                </a>
+              ) : (
+                <Link href="/#pricing" className="hover:text-white transition">
+                  Pricing
+                </Link>
+              )}
+            </>
           )}
 
           {user ? (
