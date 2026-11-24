@@ -253,7 +253,7 @@ export default function PublicPassportPage({
                 <span className="truncate">{companyName}</span>
               </h1>
               <p className="text-xs text-slate-400 mt-1">
-                Verified TradePass Job-Site Compliance Roster ({activeTimeZone})
+                Verified TradePass Job-Site Compliance Roster
               </p>
             </div>
           </div>
