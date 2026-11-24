@@ -39,7 +39,8 @@ import {
 import { db, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
-const MAX_DATA_IMAGE_BYTES = 500 * 1024; // ~500 KB to stay safely under Firestore's 1 MiB document limit
+const MAX_DATA_IMAGE_BYTES = 450 * 1024; // ~450 KB per image
+const MAX_TOTAL_DOC_DATA_CHARS = 750 * 1024; // Stay safely under Firestore's 1 MiB document limit
 const DEFAULT_TIME_ZONE = 'America/New_York';
 
 interface UserProfile {
@@ -55,17 +56,73 @@ interface UserProfile {
   timezone?: string;
 }
 
+interface WorkerCertificate {
+  id: string;
+  label: string;
+  certNumber?: string;
+  expDate?: string;
+  fileName?: string | null;
+  fileUrl?: string | null;
+}
+
 interface Worker {
   id: string;
   name: string;
   role: string;
   trade: string;
+  certificates?: WorkerCertificate[];
   oshaCertNumber?: string;
   oshaExpDate?: string;
-  fileName?: string;
+  fileName?: string | null;
   fileUrl?: string | null;
   status?: 'Compliant' | 'Warning' | 'Expired';
   docsCount: number;
+}
+
+function createCertificateDraft(overrides?: Partial<WorkerCertificate>): WorkerCertificate {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    label: '',
+    certNumber: '',
+    expDate: '',
+    fileName: null,
+    fileUrl: null,
+    ...overrides,
+  };
+}
+
+function normalizeWorkerCertificates(data: any): WorkerCertificate[] {
+  if (Array.isArray(data?.certificates) && data.certificates.length > 0) {
+    return data.certificates.map((cert: any, idx: number) => ({
+      id: cert.id || `cert-${idx}`,
+      label: cert.label || `Certificate #${idx + 1}`,
+      certNumber: cert.certNumber || '',
+      expDate: cert.expDate || '',
+      fileName: cert.fileName || null,
+      fileUrl: cert.fileUrl || null,
+    }));
+  }
+
+  const hasLegacyData =
+    (data?.oshaCertNumber && data.oshaCertNumber !== 'N/A') ||
+    Boolean(data?.oshaExpDate) ||
+    Boolean(data?.fileUrl) ||
+    Boolean(data?.fileName);
+
+  if (hasLegacyData) {
+    return [
+      {
+        id: 'legacy-cert-0',
+        label: 'Primary Credential',
+        certNumber: data.oshaCertNumber && data.oshaCertNumber !== 'N/A' ? data.oshaCertNumber : '',
+        expDate: data.oshaExpDate || '',
+        fileName: data.fileName || null,
+        fileUrl: data.fileUrl || null,
+      },
+    ];
+  }
+
+  return [];
 }
 
 function getSafeTimeZone(timeZone?: string | null): string {
@@ -159,7 +216,7 @@ function readImageFileAsDataUrl(file: File): Promise<string> {
     }
 
     if (file.size > MAX_DATA_IMAGE_BYTES) {
-      reject(new Error('Image is too large for Firestore (max ~500 KB). Please crop, resize, or take a smaller screenshot.'));
+      reject(new Error('Image is too large for Firestore (max ~450 KB per image). Please crop or resize it first.'));
       return;
     }
 
@@ -212,6 +269,63 @@ function getComplianceStatus(
   return 'Compliant';
 }
 
+function getWorkerOverallStatus(
+  certificates: WorkerCertificate[],
+  timeZone: string
+): 'Compliant' | 'Warning' | 'Expired' {
+  if (!certificates || certificates.length === 0) return 'Compliant';
+
+  let hasWarning = false;
+  for (const cert of certificates) {
+    const status = getComplianceStatus(cert.expDate, timeZone);
+    if (status === 'Expired') return 'Expired';
+    if (status === 'Warning') hasWarning = true;
+  }
+
+  return hasWarning ? 'Warning' : 'Compliant';
+}
+
+function getPrimaryCertificateForSummary(
+  certificates: WorkerCertificate[]
+): WorkerCertificate | undefined {
+  if (!certificates || certificates.length === 0) return undefined;
+
+  const withDates = certificates
+    .filter((c) => Boolean(c.expDate))
+    .sort((a, b) => (a.expDate || '').localeCompare(b.expDate || ''));
+
+  return withDates[0] || certificates[0];
+}
+
+function sanitizeCertificatesForSave(drafts: WorkerCertificate[]): WorkerCertificate[] {
+  return drafts
+    .map((cert, idx) => {
+      const safeUrl = getSafeCertificateUrl(cert.fileUrl);
+      const cleanLabel = cert.label.trim() || `Certificate #${idx + 1}`;
+      const cleanNumber = (cert.certNumber || '').trim();
+      const cleanExpDate = (cert.expDate || '').trim();
+      const cleanFileName = safeUrl
+        ? cert.fileName || 'certificate-screenshot.png'
+        : null;
+
+      return {
+        id: cert.id || createCertificateDraft().id,
+        label: cleanLabel,
+        certNumber: cleanNumber,
+        expDate: cleanExpDate,
+        fileName: cleanFileName,
+        fileUrl: safeUrl,
+      };
+    })
+    .filter(
+      (cert) =>
+        Boolean(cert.certNumber) ||
+        Boolean(cert.expDate) ||
+        Boolean(cert.fileUrl) ||
+        drafts.length === 1
+    );
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -231,24 +345,23 @@ export default function DashboardPage() {
 
   const [copiedLink, setCopiedLink] = useState(false);
 
+  // Add Worker Form State
   const [workerName, setWorkerName] = useState('');
   const [workerRole, setWorkerRole] = useState('');
   const [workerTrade, setWorkerTrade] = useState('General');
-  const [oshaCertNumber, setOshaCertNumber] = useState('');
-  const [oshaExpDate, setOshaExpDate] = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [certificateDataUrl, setCertificateDataUrl] = useState<string | null>(null);
+  const [addCertificates, setAddCertificates] = useState<WorkerCertificate[]>([
+    createCertificateDraft({ label: 'OSHA 30 / Safety Card' }),
+  ]);
+  const [activeAddCertIndex, setActiveAddCertIndex] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
-  // Edit Certificate Form State
+  // Edit Worker Form State
   const [editWorkerName, setEditWorkerName] = useState('');
   const [editWorkerRole, setEditWorkerRole] = useState('');
   const [editWorkerTrade, setEditWorkerTrade] = useState('General');
-  const [editOshaCertNumber, setEditOshaCertNumber] = useState('');
-  const [editOshaExpDate, setEditOshaExpDate] = useState('');
-  const [editSelectedFile, setEditSelectedFile] = useState<File | null>(null);
-  const [editCertificateDataUrl, setEditCertificateDataUrl] = useState<string | null>(null);
+  const [editCertificates, setEditCertificates] = useState<WorkerCertificate[]>([]);
+  const [activeEditCertIndex, setActiveEditCertIndex] = useState(0);
   const [updatingWorker, setUpdatingWorker] = useState(false);
   const [editFormError, setEditFormError] = useState('');
 
@@ -288,10 +401,13 @@ export default function DashboardPage() {
       const workerList: Worker[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        const calculatedStatus = getComplianceStatus(data.oshaExpDate, activeTimeZone);
+        const normalizedCerts = normalizeWorkerCertificates(data);
+        const calculatedStatus = getWorkerOverallStatus(normalizedCerts, activeTimeZone);
         workerList.push({ 
           id: docSnap.id, 
           ...data,
+          certificates: normalizedCerts,
+          docsCount: normalizedCerts.length,
           status: calculatedStatus 
         } as Worker);
       });
@@ -423,17 +539,23 @@ export default function DashboardPage() {
       digestText += `No worker profiles registered in roster.\n`;
     } else {
       workers.forEach((w, index) => {
-        const safeUrl = getSafeCertificateUrl(w.fileUrl);
+        const certs = w.certificates || [];
         digestText += `${index + 1}. WORKER: ${w.name.toUpperCase()}\n`;
         digestText += `   - Trade & Role: ${w.trade || 'General'} — ${w.role}\n`;
-        digestText += `   - Compliance Status: [${w.status?.toUpperCase()}]\n`;
-        digestText += `   - Credential / Policy Number: ${w.oshaCertNumber || 'N/A'}\n`;
-        digestText += `   - Expiration Date: ${formatDateString(w.oshaExpDate)}\n`;
-        digestText += `   - Attached Verification Document: ${w.fileName || 'None'}\n`;
-        if (safeUrl && !safeUrl.startsWith('data:')) {
-          digestText += `   - Document Link: ${safeUrl}\n`;
-        } else if (safeUrl?.startsWith('data:image/')) {
-          digestText += `   - Document Link: [Embedded Screenshot Image]\n`;
+        digestText += `   - Overall Compliance Status: [${w.status?.toUpperCase()}]\n`;
+        digestText += `   - Certificates on File (${certs.length}):\n`;
+
+        if (certs.length === 0) {
+          digestText += `     * No certificates attached.\n`;
+        } else {
+          certs.forEach((cert, cIdx) => {
+            const certStatus = getComplianceStatus(cert.expDate, activeTimeZone);
+            const safeUrl = getSafeCertificateUrl(cert.fileUrl);
+            digestText += `     ${cIdx + 1}) ${cert.label || 'Credential'} [${certStatus.toUpperCase()}]\n`;
+            digestText += `        - Policy / Cert #: ${cert.certNumber || 'N/A'}\n`;
+            digestText += `        - Expiration: ${formatDateString(cert.expDate)}\n`;
+            digestText += `        - Document: ${cert.fileName || 'None'}${safeUrl?.startsWith('data:image/') ? ' [Embedded Screenshot]' : ''}\n`;
+          });
         }
         digestText += `---------------------------------------------------\n`;
       });
@@ -452,15 +574,45 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
   };
 
-  const handleAddImageSelect = async (file: File) => {
+  // Add Modal Certificate Handlers
+  const updateAddCertificateField = (
+    index: number,
+    updates: Partial<WorkerCertificate>
+  ) => {
+    setAddCertificates((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, ...updates } : item))
+    );
+  };
+
+  const handleAddCertificateRow = () => {
+    setAddCertificates((prev) => {
+      const next = [
+        ...prev,
+        createCertificateDraft({ label: `Certificate #${prev.length + 1}` }),
+      ];
+      setActiveAddCertIndex(next.length - 1);
+      return next;
+    });
+  };
+
+  const handleRemoveAddCertificateRow = (index: number) => {
+    setAddCertificates((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((_, idx) => idx !== index);
+      setActiveAddCertIndex((curr) => Math.min(curr, next.length - 1));
+      return next;
+    });
+  };
+
+  const handleAddImageSelect = async (index: number, file: File) => {
     setFormError('');
     try {
       const dataUrl = await readImageFileAsDataUrl(file);
-      setSelectedFile(file);
-      setCertificateDataUrl(dataUrl);
+      updateAddCertificateField(index, {
+        fileName: file.name,
+        fileUrl: dataUrl,
+      });
     } catch (err: any) {
-      setSelectedFile(null);
-      setCertificateDataUrl(null);
       setFormError(err.message || 'Could not process image.');
     }
   };
@@ -477,22 +629,53 @@ export default function DashboardPage() {
           e.preventDefault();
           const generatedName = `pasted-certificate-${Date.now()}.${item.type.split('/')[1] || 'png'}`;
           const namedFile = new File([file], generatedName, { type: file.type });
-          await handleAddImageSelect(namedFile);
+          const targetIndex = Math.min(activeAddCertIndex, addCertificates.length - 1);
+          await handleAddImageSelect(targetIndex, namedFile);
           return;
         }
       }
     }
   };
 
-  const handleEditImageSelect = async (file: File) => {
+  // Edit Modal Certificate Handlers
+  const updateEditCertificateField = (
+    index: number,
+    updates: Partial<WorkerCertificate>
+  ) => {
+    setEditCertificates((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, ...updates } : item))
+    );
+  };
+
+  const handleEditCertificateRow = () => {
+    setEditCertificates((prev) => {
+      const next = [
+        ...prev,
+        createCertificateDraft({ label: `Certificate #${prev.length + 1}` }),
+      ];
+      setActiveEditCertIndex(next.length - 1);
+      return next;
+    });
+  };
+
+  const handleRemoveEditCertificateRow = (index: number) => {
+    setEditCertificates((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((_, idx) => idx !== index);
+      setActiveEditCertIndex((curr) => Math.min(curr, next.length - 1));
+      return next;
+    });
+  };
+
+  const handleEditImageSelect = async (index: number, file: File) => {
     setEditFormError('');
     try {
       const dataUrl = await readImageFileAsDataUrl(file);
-      setEditSelectedFile(file);
-      setEditCertificateDataUrl(dataUrl);
+      updateEditCertificateField(index, {
+        fileName: file.name,
+        fileUrl: dataUrl,
+      });
     } catch (err: any) {
-      setEditSelectedFile(null);
-      setEditCertificateDataUrl(null);
       setEditFormError(err.message || 'Could not process image.');
     }
   };
@@ -509,7 +692,8 @@ export default function DashboardPage() {
           e.preventDefault();
           const generatedName = `pasted-certificate-${Date.now()}.${item.type.split('/')[1] || 'png'}`;
           const namedFile = new File([file], generatedName, { type: file.type });
-          await handleEditImageSelect(namedFile);
+          const targetIndex = Math.min(activeEditCertIndex, editCertificates.length - 1);
+          await handleEditImageSelect(targetIndex, namedFile);
           return;
         }
       }
@@ -520,43 +704,51 @@ export default function DashboardPage() {
     e.preventDefault();
     setFormError('');
 
-    if (!user || !workerName) return;
+    if (!user || !workerName.trim()) return;
 
     if (isAtCapacity) {
       setFormError(`Plan limit reached (${maxWorkers} worker profiles max). Upgrade plan to add more crew members.`);
       return;
     }
 
+    const cleanedCerts = sanitizeCertificatesForSave(addCertificates);
+    const totalPayloadSize = cleanedCerts.reduce(
+      (sum, c) => sum + (c.fileUrl ? c.fileUrl.length : 0),
+      0
+    );
+
+    if (totalPayloadSize > MAX_TOTAL_DOC_DATA_CHARS) {
+      setFormError('Combined certificate images are too large for a single Firestore profile (~750 KB max). Please use smaller screenshots.');
+      return;
+    }
+
+    const primaryCert = getPrimaryCertificateForSummary(cleanedCerts);
+
     try {
       setSubmitting(true);
 
-      const savedFileUrl = getSafeCertificateUrl(certificateDataUrl);
-      const savedFileName = savedFileUrl
-        ? (selectedFile?.name || 'certificate-screenshot.png')
-        : null;
-
       await addDoc(collection(db, 'users', user.uid, 'workers'), {
-        name: workerName,
-        role: workerRole || 'Technician',
+        name: workerName.trim(),
+        role: workerRole.trim() || 'Technician',
         trade: workerTrade || 'General',
-        oshaCertNumber: oshaCertNumber || 'N/A',
-        oshaExpDate: oshaExpDate || '',
-        fileName: savedFileName,
-        fileUrl: savedFileUrl,
-        docsCount: savedFileUrl || oshaCertNumber ? 1 : 0,
-        createdAt: serverTimestamp()
+        certificates: cleanedCerts,
+        // Keep legacy top-level fields synced with the most urgent/primary certificate
+        oshaCertNumber: primaryCert?.certNumber || 'N/A',
+        oshaExpDate: primaryCert?.expDate || '',
+        fileName: primaryCert?.fileName || null,
+        fileUrl: primaryCert?.fileUrl || null,
+        docsCount: cleanedCerts.length,
+        createdAt: serverTimestamp(),
       });
 
       setWorkerName('');
       setWorkerRole('');
       setWorkerTrade('General');
-      setOshaCertNumber('');
-      setOshaExpDate('');
-      setSelectedFile(null);
-      setCertificateDataUrl(null);
+      setAddCertificates([createCertificateDraft({ label: 'OSHA 30 / Safety Card' })]);
+      setActiveAddCertIndex(0);
       setShowUploadModal(false);
     } catch (err: any) {
-      console.error("Error adding worker:", err);
+      console.error('Error adding worker:', err);
       setFormError(err.message || 'Failed to add worker profile.');
     } finally {
       setSubmitting(false);
@@ -570,14 +762,14 @@ export default function DashboardPage() {
     setEditWorkerName(worker.name || '');
     setEditWorkerRole(worker.role || '');
     setEditWorkerTrade(worker.trade || 'General');
-    setEditOshaCertNumber(
-      worker.oshaCertNumber && worker.oshaCertNumber !== 'N/A'
-        ? worker.oshaCertNumber
-        : ''
+
+    const existingCerts = normalizeWorkerCertificates(worker);
+    setEditCertificates(
+      existingCerts.length > 0
+        ? existingCerts
+        : [createCertificateDraft({ label: 'OSHA 30 / Safety Card' })]
     );
-    setEditOshaExpDate(worker.oshaExpDate || '');
-    setEditSelectedFile(null);
-    setEditCertificateDataUrl(getSafeCertificateUrl(worker.fileUrl));
+    setActiveEditCertIndex(0);
   };
 
   const handleUpdateWorker = async (e: React.FormEvent) => {
@@ -586,35 +778,41 @@ export default function DashboardPage() {
 
     if (!user || !workerToEdit || !editWorkerName.trim()) return;
 
+    const cleanedCerts = sanitizeCertificatesForSave(editCertificates);
+    const totalPayloadSize = cleanedCerts.reduce(
+      (sum, c) => sum + (c.fileUrl ? c.fileUrl.length : 0),
+      0
+    );
+
+    if (totalPayloadSize > MAX_TOTAL_DOC_DATA_CHARS) {
+      setEditFormError('Combined certificate images are too large for a single Firestore profile (~750 KB max). Please use smaller screenshots.');
+      return;
+    }
+
+    const primaryCert = getPrimaryCertificateForSummary(cleanedCerts);
+
     try {
       setUpdatingWorker(true);
-      const updatedFileUrl = getSafeCertificateUrl(editCertificateDataUrl);
-      const updatedFileName = editSelectedFile
-        ? editSelectedFile.name
-        : updatedFileUrl
-        ? (workerToEdit.fileName || 'certificate-screenshot.png')
-        : null;
-
-      const updatedCertNumber = editOshaCertNumber.trim() || 'N/A';
 
       await updateDoc(doc(db, 'users', user.uid, 'workers', workerToEdit.id), {
         name: editWorkerName.trim(),
         role: editWorkerRole.trim() || 'Technician',
         trade: editWorkerTrade || 'General',
-        oshaCertNumber: updatedCertNumber,
-        oshaExpDate: editOshaExpDate || '',
-        fileName: updatedFileName,
-        fileUrl: updatedFileUrl,
-        docsCount: updatedFileName || updatedCertNumber !== 'N/A' ? 1 : 0,
+        certificates: cleanedCerts,
+        // Keep legacy top-level fields synced with the most urgent/primary certificate
+        oshaCertNumber: primaryCert?.certNumber || 'N/A',
+        oshaExpDate: primaryCert?.expDate || '',
+        fileName: primaryCert?.fileName || null,
+        fileUrl: primaryCert?.fileUrl || null,
+        docsCount: cleanedCerts.length,
         updatedAt: serverTimestamp(),
       });
 
       setWorkerToEdit(null);
-      setEditSelectedFile(null);
-      setEditCertificateDataUrl(null);
+      setEditCertificates([]);
     } catch (err: any) {
-      console.error('Error updating certificate:', err);
-      setEditFormError(err.message || 'Failed to update certificate.');
+      console.error('Error updating certificates:', err);
+      setEditFormError(err.message || 'Failed to update certificates.');
     } finally {
       setUpdatingWorker(false);
     }
@@ -628,7 +826,7 @@ export default function DashboardPage() {
       await deleteDoc(doc(db, 'users', user.uid, 'workers', workerToDelete.id));
       setWorkerToDelete(null);
     } catch (err) {
-      console.error("Error deleting worker profile:", err);
+      console.error('Error deleting worker profile:', err);
     } finally {
       setDeletingWorker(false);
     }
@@ -645,7 +843,7 @@ export default function DashboardPage() {
       });
       setNewForemanEmail('');
     } catch (err) {
-      console.error("Error adding foreman:", err);
+      console.error('Error adding foreman:', err);
     }
   };
 
@@ -657,7 +855,7 @@ export default function DashboardPage() {
         foremanEmails: arrayRemove(emailToRemove)
       });
     } catch (err) {
-      console.error("Error removing foreman:", err);
+      console.error('Error removing foreman:', err);
     }
   };
 
@@ -673,23 +871,24 @@ export default function DashboardPage() {
       });
       setShowBrandingModal(false);
     } catch (err) {
-      console.error("Error updating branding:", err);
+      console.error('Error updating branding:', err);
     }
   };
 
   const filteredWorkers = workers.filter(w => 
     w.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     w.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (w.trade && w.trade.toLowerCase().includes(searchTerm.toLowerCase()))
+    (w.trade && w.trade.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (w.certificates || []).some(
+      (c) =>
+        c.label.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c.certNumber && c.certNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
   );
 
   const compliantCount = workers.filter(w => w.status === 'Compliant').length;
   const warningCount = workers.filter(w => w.status === 'Warning').length;
   const expiredCount = workers.filter(w => w.status === 'Expired').length;
-
-  const detailsSafeUrl = workerDetailsModal
-    ? getSafeCertificateUrl(workerDetailsModal.fileUrl)
-    : null;
 
   if (loading) {
     return (
@@ -761,7 +960,7 @@ export default function DashboardPage() {
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-400 mt-0.5 truncate">
-                Compliance Command Center • Job-site access &amp; worker certifications.
+                Compliance Command Center • Job-site access &amp; worker certifications ({activeTimeZone}).
               </p>
             </div>
           </div>
@@ -908,7 +1107,7 @@ export default function DashboardPage() {
               {totalActive} <span className="text-lg text-slate-500 font-normal">/ {isEnterpriseTier ? '∞' : maxWorkers}</span>
             </div>
             <span className="text-xs text-slate-500 mt-1 block">
-              {isEnterpriseTier ? 'Priority 30, 15, 7, & 1-Day Urgent Alerts' : isStandardTier ? 'Automated 30 & 15-Day Alerts' : 'Automated 30, 15, & 7-Day Alerts'}
+              {isEnterpriseTier ? 'Priority 30, 15, 7, & 1-Day Urgent Alerts' : isStandardTier ? 'Automated 30 & 15-Day Alerts' : 'Automated 30, 15, 7 Day Alerts'}
             </span>
           </article>
 
@@ -961,7 +1160,7 @@ export default function DashboardPage() {
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
             <input 
               type="text" 
-              placeholder="Search crew members..."
+              placeholder="Search crew or certificates..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition"
@@ -969,7 +1168,10 @@ export default function DashboardPage() {
           </div>
 
           <button 
-            onClick={() => setShowUploadModal(true)}
+            onClick={() => {
+              setFormError('');
+              setShowUploadModal(true);
+            }}
             disabled={isAtCapacity}
             className="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm px-4 py-2.5 rounded-xl shadow-lg shadow-blue-600/20 flex items-center justify-center space-x-2 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
           >
@@ -991,92 +1193,106 @@ export default function DashboardPage() {
                 No worker profiles created yet. Click &quot;Add Worker Profile&quot; to build your roster.
               </div>
             ) : (
-              <table className="w-full text-left text-sm text-slate-300 min-w-[640px]">
+              <table className="w-full text-left text-sm text-slate-300 min-w-[680px]">
                 <thead className="bg-slate-950/50 text-xs font-semibold uppercase tracking-wider text-slate-400 border-b border-slate-800">
                   <tr>
                     <th className="px-6 py-3">Worker Name</th>
                     <th className="px-6 py-3">Trade / Role</th>
+                    <th className="px-6 py-3">Certificates</th>
                     <th className="px-6 py-3">Compliance Status</th>
-                    <th className="px-6 py-3">Expiration Date</th>
+                    <th className="px-6 py-3">Next Expiration</th>
                     <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {filteredWorkers.map((worker) => (
-                    <tr key={worker.id} className="hover:bg-slate-800/40 transition">
-                      <td className="px-6 py-4 font-semibold text-white whitespace-nowrap">{worker.name}</td>
-                      <td className="px-6 py-4 text-slate-400">
-                        <span className="text-white font-medium">{worker.trade || 'General'}</span> • {worker.role}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {worker.status === 'Compliant' && (
-                          <span className="inline-flex items-center space-x-1.5 bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 text-xs px-3 py-1 rounded-full font-semibold">
-                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                            <span>Compliant</span>
-                          </span>
-                        )}
-                        {worker.status === 'Warning' && (
-                          <span className="inline-flex items-center space-x-1.5 bg-amber-950/80 text-amber-400 border border-amber-800/60 text-xs px-3 py-1 rounded-full font-semibold">
-                            <Clock className="w-3.5 h-3.5 shrink-0" />
-                            <span>Expires Soon</span>
-                          </span>
-                        )}
-                        {worker.status === 'Expired' && (
-                          <span className="inline-flex items-center space-x-1.5 bg-rose-950/80 text-rose-400 border border-rose-800/60 text-xs px-3 py-1 rounded-full font-semibold">
-                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                            <span>Non-Compliant</span>
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-slate-400 whitespace-nowrap">
-                        {formatDateString(worker.oshaExpDate)}
-                      </td>
-                      <td className="px-6 py-4 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end space-x-3">
-                          <button 
-                            onClick={() => openEditWorkerModal(worker)}
-                            className="inline-flex items-center space-x-1 text-xs font-semibold text-amber-400 hover:text-amber-300 transition cursor-pointer"
-                            title="Edit Certificate"
-                          >
-                            <Pencil className="w-3.5 h-3.5 shrink-0" />
-                            <span>Edit Certificate</span>
-                          </button>
+                  {filteredWorkers.map((worker) => {
+                    const certs = worker.certificates || [];
+                    const nextExpiringCert = getPrimaryCertificateForSummary(certs);
 
-                          <button 
-                            onClick={() => setWorkerDetailsModal(worker)}
-                            className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer"
-                          >
-                            View Details
-                          </button>
+                    return (
+                      <tr key={worker.id} className="hover:bg-slate-800/40 transition">
+                        <td className="px-6 py-4 font-semibold text-white whitespace-nowrap">{worker.name}</td>
+                        <td className="px-6 py-4 text-slate-400">
+                          <span className="text-white font-medium">{worker.trade || 'General'}</span> • {worker.role}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="inline-flex items-center space-x-1.5 bg-slate-950 border border-slate-800 text-slate-300 text-xs px-2.5 py-1 rounded-lg font-medium">
+                            <FileCheck className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                            <span>
+                              {certs.length} {certs.length === 1 ? 'Certificate' : 'Certificates'}
+                            </span>
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {worker.status === 'Compliant' && (
+                            <span className="inline-flex items-center space-x-1.5 bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 text-xs px-3 py-1 rounded-full font-semibold">
+                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                              <span>Compliant</span>
+                            </span>
+                          )}
+                          {worker.status === 'Warning' && (
+                            <span className="inline-flex items-center space-x-1.5 bg-amber-950/80 text-amber-400 border border-amber-800/60 text-xs px-3 py-1 rounded-full font-semibold">
+                              <Clock className="w-3.5 h-3.5 shrink-0" />
+                              <span>Expires Soon</span>
+                            </span>
+                          )}
+                          {worker.status === 'Expired' && (
+                            <span className="inline-flex items-center space-x-1.5 bg-rose-950/80 text-rose-400 border border-rose-800/60 text-xs px-3 py-1 rounded-full font-semibold">
+                              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                              <span>Non-Compliant</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-slate-400 whitespace-nowrap">
+                          {formatDateString(nextExpiringCert?.expDate)}
+                        </td>
+                        <td className="px-6 py-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end space-x-3">
+                            <button 
+                              onClick={() => openEditWorkerModal(worker)}
+                              className="inline-flex items-center space-x-1 text-xs font-semibold text-amber-400 hover:text-amber-300 transition cursor-pointer"
+                              title="Edit Worker & Certificates"
+                            >
+                              <Pencil className="w-3.5 h-3.5 shrink-0" />
+                              <span>Edit</span>
+                            </button>
 
-                          <button
-                            onClick={() => setWorkerToDelete(worker)}
-                            className="p-1 text-slate-500 hover:text-rose-400 transition cursor-pointer"
-                            title="Delete Worker Profile"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            <button 
+                              onClick={() => setWorkerDetailsModal(worker)}
+                              className="text-xs font-semibold text-blue-400 hover:text-blue-300 transition cursor-pointer"
+                            >
+                              View Details
+                            </button>
+
+                            <button
+                              onClick={() => setWorkerToDelete(worker)}
+                              className="p-1 text-slate-500 hover:text-rose-400 transition cursor-pointer"
+                              title="Delete Worker Profile"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
           </div>
         </section>
 
-        {/* Modal: Edit Worker Certificate */}
+        {/* Modal: Edit Worker & Certificates */}
         {workerToEdit && (
           <div
             onPaste={handleEditPaste}
             className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
           >
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-lg w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
               <header className="flex justify-between items-center mb-4">
                 <div className="flex items-center space-x-2 text-amber-400">
                   <Pencil className="w-4 h-4 shrink-0" />
-                  <h3 className="text-base sm:text-lg font-bold text-white">Edit Worker Certificate</h3>
+                  <h3 className="text-base sm:text-lg font-bold text-white">Edit Worker &amp; Certificates</h3>
                 </div>
                 <button 
                   onClick={() => setWorkerToEdit(null)}
@@ -1108,117 +1324,185 @@ export default function DashboardPage() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Trade Specialty
-                  </label>
-                  <select
-                    value={editWorkerTrade}
-                    onChange={(e) => setEditWorkerTrade(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="General">General / Other</option>
-                    <option value="Flooring">Flooring</option>
-                    <option value="Electrical">Electrical</option>
-                    <option value="Plumbing">Plumbing</option>
-                    <option value="HVAC">HVAC</option>
-                    <option value="Carpentry">Carpentry</option>
-                    <option value="Roofing">Roofing</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Role / Position
-                  </label>
-                  <input 
-                    type="text" 
-                    required
-                    placeholder="e.g. Flooring Technician"
-                    value={editWorkerRole}
-                    onChange={(e) => setEditWorkerRole(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Credential / Policy Number
-                  </label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. OSHA-30-99482, LIC-88412, or POL-40921"
-                    value={editOshaCertNumber}
-                    onChange={(e) => setEditOshaCertNumber(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                      Expiration Date
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                      Trade Specialty
                     </label>
-                    <span className="text-[11px] text-slate-500">Optional if non-expiring</span>
+                    <select
+                      value={editWorkerTrade}
+                      onChange={(e) => setEditWorkerTrade(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="General">General / Other</option>
+                      <option value="Flooring">Flooring</option>
+                      <option value="Electrical">Electrical</option>
+                      <option value="Plumbing">Plumbing</option>
+                      <option value="HVAC">HVAC</option>
+                      <option value="Carpentry">Carpentry</option>
+                      <option value="Roofing">Roofing</option>
+                    </select>
                   </div>
-                  <input 
-                    type="date" 
-                    value={editOshaExpDate}
-                    onChange={(e) => setEditOshaExpDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white [color-scheme:dark] focus:outline-none focus:border-blue-500"
-                  />
+
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                      Role / Position
+                    </label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="e.g. Flooring Technician"
+                      value={editWorkerRole}
+                      onChange={(e) => setEditWorkerRole(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Paste Screenshot (Ctrl+V / Cmd+V) or Select Image
-                  </label>
-                  <label className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-4 text-center cursor-pointer transition bg-slate-950/50 flex flex-col items-center justify-center">
-                    <Upload className="w-6 h-6 text-slate-400 mb-1.5" />
-                    <span className="text-xs text-slate-300 font-medium truncate max-w-full px-2">
-                      {editSelectedFile
-                        ? editSelectedFile.name
-                        : workerToEdit.fileName
-                        ? `Current: ${workerToEdit.fileName}`
-                        : 'Paste a screenshot here or click to select image'}
+                {/* Multiple Certificates Section */}
+                <div className="space-y-3 pt-2 border-t border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Certificates &amp; Credentials ({editCertificates.length})
                     </span>
-                    <span className="text-[10px] text-slate-500 mt-0.5">
-                      Small images saved directly in Firestore (~500 KB max)
-                    </span>
-                    <input 
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          handleEditImageSelect(e.target.files[0]);
-                        }
-                      }}
-                    />
-                  </label>
+                    <button
+                      type="button"
+                      onClick={handleEditCertificateRow}
+                      className="inline-flex items-center space-x-1 text-xs font-semibold text-blue-400 hover:text-blue-300 bg-blue-500/10 border border-blue-500/30 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Certificate</span>
+                    </button>
+                  </div>
 
-                  {editCertificateDataUrl && isImageCertificate(editCertificateDataUrl) && (
-                    <div className="mt-2.5 rounded-xl border border-slate-800 bg-slate-950 p-2.5 space-y-2">
-                      <div className="flex items-center justify-between text-[11px] text-slate-400">
-                        <span>Screenshot Preview</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditSelectedFile(null);
-                            setEditCertificateDataUrl(null);
-                          }}
-                          className="text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
-                        >
-                          Remove
-                        </button>
+                  {editCertificates.map((cert, idx) => {
+                    const safeCertUrl = getSafeCertificateUrl(cert.fileUrl);
+                    const isFocused = activeEditCertIndex === idx;
+
+                    return (
+                      <div
+                        key={cert.id}
+                        onClick={() => setActiveEditCertIndex(idx)}
+                        className={`p-3.5 rounded-xl border bg-slate-950/70 space-y-3 transition ${
+                          isFocused ? 'border-blue-500/60' : 'border-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-300">
+                            Certificate #{idx + 1}
+                          </span>
+                          {editCertificates.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveEditCertificateRow(idx);
+                              }}
+                              className="inline-flex items-center space-x-1 text-[11px] font-semibold text-rose-400 hover:text-rose-300 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Remove</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                            Certificate Type / Name
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. OSHA 30, Trade License, Insurance Binder"
+                            value={cert.label}
+                            onChange={(e) =>
+                              updateEditCertificateField(idx, { label: e.target.value })
+                            }
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                              Credential / Policy Number
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="e.g. OSHA-30-99482"
+                              value={cert.certNumber || ''}
+                              onChange={(e) =>
+                                updateEditCertificateField(idx, { certNumber: e.target.value })
+                              }
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                              Expiration Date
+                            </label>
+                            <input
+                              type="date"
+                              value={cert.expDate || ''}
+                              onChange={(e) =>
+                                updateEditCertificateField(idx, { expDate: e.target.value })
+                              }
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white [color-scheme:dark] focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                            Screenshot (Click card &amp; Ctrl+V, or select image)
+                          </label>
+                          <label className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-3 text-center cursor-pointer transition bg-slate-950/50 flex flex-col items-center justify-center">
+                            <Upload className="w-5 h-5 text-slate-400 mb-1" />
+                            <span className="text-xs text-slate-300 font-medium truncate max-w-full px-2">
+                              {cert.fileName
+                                ? `Attached: ${cert.fileName}`
+                                : 'Paste screenshot (Ctrl+V) or select image'}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  handleEditImageSelect(idx, e.target.files[0]);
+                                }
+                              }}
+                            />
+                          </label>
+
+                          {safeCertUrl && isImageCertificate(safeCertUrl) && (
+                            <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950 p-2 space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                <span>Preview</span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateEditCertificateField(idx, {
+                                      fileName: null,
+                                      fileUrl: null,
+                                    })
+                                  }
+                                  className="text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                                >
+                                  Remove Image
+                                </button>
+                              </div>
+                              <img
+                                src={safeCertUrl}
+                                alt={cert.label || 'Certificate preview'}
+                                className="max-h-32 w-full rounded-lg object-contain bg-slate-900"
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <img
-                        src={editCertificateDataUrl}
-                        alt="Certificate preview"
-                        className="max-h-40 w-full rounded-lg object-contain bg-slate-900"
-                      />
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
 
                 <div className="flex space-x-3 pt-1">
@@ -1245,7 +1529,7 @@ export default function DashboardPage() {
         {/* Modal: Worker Details Breakdown */}
         {workerDetailsModal && (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-lg w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
                 <div className="flex items-center space-x-2 text-blue-400">
                   <FileCheck className="w-5 h-5 shrink-0" />
@@ -1261,9 +1545,22 @@ export default function DashboardPage() {
 
               <div className="space-y-4 text-sm text-slate-300">
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-                  <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Full Name</span>
-                    <span className="text-base font-bold text-white">{workerDetailsModal.name}</span>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Full Name</span>
+                      <span className="text-base font-bold text-white">{workerDetailsModal.name}</span>
+                    </div>
+                    <span
+                      className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                        workerDetailsModal.status === 'Compliant'
+                          ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800/60'
+                          : workerDetailsModal.status === 'Warning'
+                          ? 'bg-amber-950/80 text-amber-400 border-amber-800/60'
+                          : 'bg-rose-950/80 text-rose-400 border-rose-800/60'
+                      }`}
+                    >
+                      {workerDetailsModal.status}
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -1276,65 +1573,98 @@ export default function DashboardPage() {
                       <span className="text-slate-200">{workerDetailsModal.role}</span>
                     </div>
                   </div>
+                </div>
 
-                  <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Credential / Policy Number</span>
-                    <span className="font-mono text-white bg-slate-900 px-2 py-1 rounded border border-slate-800 text-xs inline-block mt-0.5">
-                      {workerDetailsModal.oshaCertNumber || 'N/A'}
-                    </span>
-                  </div>
+                {/* Itemized Certificates List */}
+                <div className="space-y-2.5">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block">
+                    Certificates on File ({(workerDetailsModal.certificates || []).length})
+                  </span>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Expiration Date</span>
-                      <span className="text-slate-200">{formatDateString(workerDetailsModal.oshaExpDate)}</span>
+                  {(workerDetailsModal.certificates || []).length === 0 ? (
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-400">
+                      No certificates attached to this worker profile yet.
                     </div>
-                    <div>
-                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Status</span>
-                      <span className={`font-semibold ${workerDetailsModal.status === 'Compliant' ? 'text-emerald-400' : workerDetailsModal.status === 'Warning' ? 'text-amber-400' : 'text-rose-400'}`}>
-                        {workerDetailsModal.status}
-                      </span>
-                    </div>
-                  </div>
+                  ) : (
+                    (workerDetailsModal.certificates || []).map((cert, idx) => {
+                      const certStatus = getComplianceStatus(cert.expDate, activeTimeZone);
+                      const safeCertUrl = getSafeCertificateUrl(cert.fileUrl);
 
-                  <div>
-                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Attached Verification Document</span>
-                    {detailsSafeUrl ? (
-                      <div className="mt-1.5 space-y-2.5 bg-slate-900 border border-slate-800 rounded-xl p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs text-slate-300 flex items-center space-x-1.5 min-w-0">
-                            <FileText className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-                            <span className="truncate">{workerDetailsModal.fileName || 'Certificate Document'}</span>
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => openCertificateInNewTab(detailsSafeUrl)}
-                            className="inline-flex items-center space-x-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg transition shrink-0 cursor-pointer"
-                          >
-                            <span>View Document</span>
-                            <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                          </button>
+                      return (
+                        <div
+                          key={cert.id || idx}
+                          className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-white text-sm">
+                              {cert.label || `Certificate #${idx + 1}`}
+                            </span>
+                            <span
+                              className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
+                                certStatus === 'Compliant'
+                                  ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800/60'
+                                  : certStatus === 'Warning'
+                                  ? 'bg-amber-950/80 text-amber-400 border-amber-800/60'
+                                  : 'bg-rose-950/80 text-rose-400 border-rose-800/60'
+                              }`}
+                            >
+                              {certStatus === 'Expired' ? 'Expired' : certStatus}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 text-xs">
+                            <div>
+                              <span className="text-[11px] uppercase tracking-wider text-slate-500 block">
+                                Credential / Policy #
+                              </span>
+                              <span className="font-mono text-slate-200">
+                                {cert.certNumber || 'N/A'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-[11px] uppercase tracking-wider text-slate-500 block">
+                                Expiration Date
+                              </span>
+                              <span className="text-slate-200">
+                                {formatDateString(cert.expDate)}
+                              </span>
+                            </div>
+                          </div>
+
+                          {safeCertUrl ? (
+                            <div className="pt-2 border-t border-slate-800/80 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs text-slate-300 flex items-center space-x-1.5 min-w-0">
+                                  <FileText className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                                  <span className="truncate">{cert.fileName || 'Certificate Document'}</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => openCertificateInNewTab(safeCertUrl)}
+                                  className="inline-flex items-center space-x-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-2.5 py-1 rounded-lg transition shrink-0 cursor-pointer"
+                                >
+                                  <span>View</span>
+                                  <ExternalLink className="w-3 h-3 shrink-0" />
+                                </button>
+                              </div>
+
+                              {isImageCertificate(safeCertUrl) && (
+                                <img
+                                  src={safeCertUrl}
+                                  alt={cert.label || 'Certificate'}
+                                  className="max-h-40 w-full rounded-lg border border-slate-800 bg-slate-900 object-contain"
+                                />
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-slate-500 pt-1">
+                              No screenshot attached
+                            </div>
+                          )}
                         </div>
-
-                        {isImageCertificate(detailsSafeUrl) && (
-                          <img
-                            src={detailsSafeUrl}
-                            alt={workerDetailsModal.fileName || `${workerDetailsModal.name} certificate`}
-                            className="max-h-48 w-full rounded-lg border border-slate-800 bg-slate-950 object-contain"
-                          />
-                        )}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-slate-400 flex items-center space-x-1.5 mt-1 truncate">
-                        <FileText className="w-3.5 h-3.5 shrink-0 text-slate-500" />
-                        <span className="truncate">
-                          {workerDetailsModal.fileName
-                            ? `${workerDetailsModal.fileName} (no viewable link saved)`
-                            : 'No document attached'}
-                        </span>
-                      </span>
-                    )}
-                  </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
 
@@ -1344,7 +1674,7 @@ export default function DashboardPage() {
                   className="w-1/2 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-xs transition cursor-pointer flex items-center justify-center space-x-1.5"
                 >
                   <Pencil className="w-3.5 h-3.5 shrink-0" />
-                  <span>Edit Certificate</span>
+                  <span>Edit Certificates</span>
                 </button>
                 <button
                   onClick={() => setWorkerDetailsModal(null)}
@@ -1403,7 +1733,7 @@ export default function DashboardPage() {
             onPaste={handleAddPaste}
             className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
           >
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-lg w-full mx-4 shadow-2xl max-h-[90vh] overflow-y-auto">
               <header className="flex justify-between items-center mb-4">
                 <h3 className="text-base sm:text-lg font-bold text-white">Add Crew Worker Profile</h3>
                 <button 
@@ -1436,111 +1766,185 @@ export default function DashboardPage() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Trade Specialty
-                  </label>
-                  <select
-                    value={workerTrade}
-                    onChange={(e) => setWorkerTrade(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="General">General / Other</option>
-                    <option value="Flooring">Flooring</option>
-                    <option value="Electrical">Electrical</option>
-                    <option value="Plumbing">Plumbing</option>
-                    <option value="HVAC">HVAC</option>
-                    <option value="Carpentry">Carpentry</option>
-                    <option value="Roofing">Roofing</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Role / Position
-                  </label>
-                  <input 
-                    type="text" 
-                    required
-                    placeholder="e.g. Flooring Technician"
-                    value={workerRole}
-                    onChange={(e) => setWorkerRole(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Credential / Policy Number
-                  </label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. OSHA-30-99482, LIC-88412, or POL-40921"
-                    value={oshaCertNumber}
-                    onChange={(e) => setOshaCertNumber(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                      Expiration Date
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                      Trade Specialty
                     </label>
-                    <span className="text-[11px] text-slate-500">Optional if non-expiring</span>
+                    <select
+                      value={workerTrade}
+                      onChange={(e) => setWorkerTrade(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="General">General / Other</option>
+                      <option value="Flooring">Flooring</option>
+                      <option value="Electrical">Electrical</option>
+                      <option value="Plumbing">Plumbing</option>
+                      <option value="HVAC">HVAC</option>
+                      <option value="Carpentry">Carpentry</option>
+                      <option value="Roofing">Roofing</option>
+                    </select>
                   </div>
-                  <input 
-                    type="date" 
-                    value={oshaExpDate}
-                    onChange={(e) => setOshaExpDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white [color-scheme:dark] focus:outline-none focus:border-blue-500"
-                  />
+
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                      Role / Position
+                    </label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="e.g. Flooring Technician"
+                      value={workerRole}
+                      onChange={(e) => setWorkerRole(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                    Paste Screenshot (Ctrl+V / Cmd+V) or Select Image
-                  </label>
-                  <label className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-4 text-center cursor-pointer transition bg-slate-950/50 flex flex-col items-center justify-center">
-                    <Upload className="w-6 h-6 text-slate-400 mb-1.5" />
-                    <span className="text-xs text-slate-300 font-medium truncate max-w-full px-2">
-                      {selectedFile ? selectedFile.name : 'Paste a screenshot (Ctrl+V) or click to select image'}
+                {/* Multiple Certificates Section */}
+                <div className="space-y-3 pt-2 border-t border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Certificates &amp; Credentials ({addCertificates.length})
                     </span>
-                    <span className="text-[10px] text-slate-500 mt-0.5">OSHA Card, Trade License, or Insurance Binder (~500 KB max)</span>
-                    <input 
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        if (e.target.files && e.target.files[0]) {
-                          handleAddImageSelect(e.target.files[0]);
-                        }
-                      }}
-                    />
-                  </label>
+                    <button
+                      type="button"
+                      onClick={handleAddCertificateRow}
+                      className="inline-flex items-center space-x-1 text-xs font-semibold text-blue-400 hover:text-blue-300 bg-blue-500/10 border border-blue-500/30 px-2.5 py-1 rounded-lg transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Certificate</span>
+                    </button>
+                  </div>
 
-                  {certificateDataUrl && isImageCertificate(certificateDataUrl) && (
-                    <div className="mt-2.5 rounded-xl border border-slate-800 bg-slate-950 p-2.5 space-y-2">
-                      <div className="flex items-center justify-between text-[11px] text-slate-400">
-                        <span>Screenshot Preview</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedFile(null);
-                            setCertificateDataUrl(null);
-                          }}
-                          className="text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
-                        >
-                          Remove
-                        </button>
+                  {addCertificates.map((cert, idx) => {
+                    const safeCertUrl = getSafeCertificateUrl(cert.fileUrl);
+                    const isFocused = activeAddCertIndex === idx;
+
+                    return (
+                      <div
+                        key={cert.id}
+                        onClick={() => setActiveAddCertIndex(idx)}
+                        className={`p-3.5 rounded-xl border bg-slate-950/70 space-y-3 transition ${
+                          isFocused ? 'border-blue-500/60' : 'border-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-300">
+                            Certificate #{idx + 1}
+                          </span>
+                          {addCertificates.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveAddCertificateRow(idx);
+                              }}
+                              className="inline-flex items-center space-x-1 text-[11px] font-semibold text-rose-400 hover:text-rose-300 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Remove</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                            Certificate Type / Name
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. OSHA 30, Trade License, Insurance Binder"
+                            value={cert.label}
+                            onChange={(e) =>
+                              updateAddCertificateField(idx, { label: e.target.value })
+                            }
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                              Credential / Policy Number
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="e.g. OSHA-30-99482"
+                              value={cert.certNumber || ''}
+                              onChange={(e) =>
+                                updateAddCertificateField(idx, { certNumber: e.target.value })
+                              }
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                              Expiration Date
+                            </label>
+                            <input
+                              type="date"
+                              value={cert.expDate || ''}
+                              onChange={(e) =>
+                                updateAddCertificateField(idx, { expDate: e.target.value })
+                              }
+                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-white [color-scheme:dark] focus:outline-none focus:border-blue-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                            Screenshot (Click card &amp; Ctrl+V, or select image)
+                          </label>
+                          <label className="border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-xl p-3 text-center cursor-pointer transition bg-slate-950/50 flex flex-col items-center justify-center">
+                            <Upload className="w-5 h-5 text-slate-400 mb-1" />
+                            <span className="text-xs text-slate-300 font-medium truncate max-w-full px-2">
+                              {cert.fileName
+                                ? `Attached: ${cert.fileName}`
+                                : 'Paste screenshot (Ctrl+V) or select image'}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  handleAddImageSelect(idx, e.target.files[0]);
+                                }
+                              }}
+                            />
+                          </label>
+
+                          {safeCertUrl && isImageCertificate(safeCertUrl) && (
+                            <div className="mt-2 rounded-xl border border-slate-800 bg-slate-950 p-2 space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                <span>Preview</span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    updateAddCertificateField(idx, {
+                                      fileName: null,
+                                      fileUrl: null,
+                                    })
+                                  }
+                                  className="text-rose-400 hover:text-rose-300 font-semibold cursor-pointer"
+                                >
+                                  Remove Image
+                                </button>
+                              </div>
+                              <img
+                                src={safeCertUrl}
+                                alt={cert.label || 'Certificate preview'}
+                                className="max-h-32 w-full rounded-lg object-contain bg-slate-900"
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <img
-                        src={certificateDataUrl}
-                        alt="Certificate preview"
-                        className="max-h-40 w-full rounded-lg object-contain bg-slate-900"
-                      />
-                    </div>
-                  )}
+                    );
+                  })}
                 </div>
 
                 <button 
