@@ -10,6 +10,12 @@ const FROM_EMAIL =
 
 const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'America/New_York';
 
+interface NormalizedCertificate {
+  label: string;
+  certNumber: string;
+  expDateRaw: unknown;
+}
+
 function getSafeTimeZone(userData: FirebaseFirestore.DocumentData): string {
   const candidate =
     typeof userData.timeZone === 'string' && userData.timeZone.trim()
@@ -90,6 +96,66 @@ function parseLocalDate(rawInput: unknown, timeZone: string): Date | null {
   return getStartOfDayInTimeZone(parsed, timeZone);
 }
 
+function formatExpDateForEmail(rawInput: unknown, timeZone: string): string {
+  const normalized = normalizeDateInput(rawInput);
+  if (typeof normalized === 'string') {
+    const trimmed = normalized.trim();
+    const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+    if (isoMatch) {
+      return `${parseInt(isoMatch[2], 10)}/${parseInt(isoMatch[3], 10)}/${isoMatch[1]}`;
+    }
+  }
+
+  const parsedDate = parseLocalDate(rawInput, timeZone);
+  if (parsedDate) {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(parsedDate);
+  }
+
+  return rawInput ? String(rawInput) : 'N/A';
+}
+
+function getWorkerCertificates(
+  worker: FirebaseFirestore.DocumentData
+): NormalizedCertificate[] {
+  if (Array.isArray(worker.certificates) && worker.certificates.length > 0) {
+    return worker.certificates.map((cert: any, idx: number) => ({
+      label:
+        typeof cert?.label === 'string' && cert.label.trim()
+          ? cert.label.trim()
+          : `Certificate #${idx + 1}`,
+      certNumber:
+        typeof cert?.certNumber === 'string' ? cert.certNumber.trim() : '',
+      expDateRaw: cert?.expDate,
+    }));
+  }
+
+  if (worker.oshaExpDate) {
+    const legacyCertNum =
+      typeof worker.oshaCertNumber === 'string' &&
+      worker.oshaCertNumber.trim() &&
+      worker.oshaCertNumber.trim() !== 'N/A'
+        ? worker.oshaCertNumber.trim()
+        : '';
+
+    return [
+      {
+        label:
+          typeof worker.cardType === 'string' && worker.cardType.trim()
+            ? worker.cardType.trim()
+            : 'Primary Credential',
+        certNumber: legacyCertNum,
+        expDateRaw: worker.oshaExpDate,
+      },
+    ];
+  }
+
+  return [];
+}
+
 function getAllowedMilestones(userData: FirebaseFirestore.DocumentData): number[] {
   const tier = (
     userData.planTier ||
@@ -145,46 +211,55 @@ export async function GET(request: Request) {
       const expiringWorkers30Days: Array<{
         name: string;
         cardType: string;
+        certNumber: string;
         expDate: string;
       }> = [];
       const expiringWorkers15Days: Array<{
         name: string;
         cardType: string;
+        certNumber: string;
         expDate: string;
       }> = [];
       const expiringWorkers7Days: Array<{
         name: string;
         cardType: string;
+        certNumber: string;
         expDate: string;
       }> = [];
       const expiringWorkers1Day: Array<{
         name: string;
         cardType: string;
+        certNumber: string;
         expDate: string;
       }> = [];
 
       workersSnapshot.forEach((workerDoc) => {
         const worker = workerDoc.data();
-        if (!worker.oshaExpDate) return;
+        const certs = getWorkerCertificates(worker);
 
-        const expDate = parseLocalDate(worker.oshaExpDate, userTimeZone);
-        if (!expDate) return;
+        for (const cert of certs) {
+          if (!cert.expDateRaw) continue;
 
-        const diffTime = expDate.getTime() - today.getTime();
-        const daysRemaining = Math.round(diffTime / msPerDay);
+          const expDate = parseLocalDate(cert.expDateRaw, userTimeZone);
+          if (!expDate) continue;
 
-        if (!allowedMilestones.includes(daysRemaining)) return;
+          const diffTime = expDate.getTime() - today.getTime();
+          const daysRemaining = Math.round(diffTime / msPerDay);
 
-        const item = {
-          name: worker.name,
-          cardType: worker.cardType || 'OSHA Certification',
-          expDate: String(worker.oshaExpDate),
-        };
+          if (!allowedMilestones.includes(daysRemaining)) continue;
 
-        if (daysRemaining === 30) expiringWorkers30Days.push(item);
-        if (daysRemaining === 15) expiringWorkers15Days.push(item);
-        if (daysRemaining === 7) expiringWorkers7Days.push(item);
-        if (daysRemaining === 1) expiringWorkers1Day.push(item);
+          const item = {
+            name: worker.name || 'Unnamed Worker',
+            cardType: cert.label,
+            certNumber: cert.certNumber,
+            expDate: formatExpDateForEmail(cert.expDateRaw, userTimeZone),
+          };
+
+          if (daysRemaining === 30) expiringWorkers30Days.push(item);
+          if (daysRemaining === 15) expiringWorkers15Days.push(item);
+          if (daysRemaining === 7) expiringWorkers7Days.push(item);
+          if (daysRemaining === 1) expiringWorkers1Day.push(item);
+        }
       });
 
       const appUrl =
@@ -193,7 +268,12 @@ export async function GET(request: Request) {
       const passportUrl = `${appUrl}/passport/${userId}`;
 
       const sendAlertEmail = async (
-        workers: Array<{ name: string; cardType: string; expDate: string }>,
+        workers: Array<{
+          name: string;
+          cardType: string;
+          certNumber: string;
+          expDate: string;
+        }>,
         timeframeText: string,
         subjectPrefix: string,
         isUrgent = false
@@ -201,7 +281,9 @@ export async function GET(request: Request) {
         const listHtml = workers
           .map(
             (w) =>
-              `<li style="margin-bottom: 6px;"><strong>${w.name}</strong> - ${w.cardType} (Expires: ${w.expDate})</li>`
+              `<li style="margin-bottom: 6px;"><strong>${w.name}</strong> - ${w.cardType}${
+                w.certNumber ? ` (#${w.certNumber})` : ''
+              } (Expires: ${w.expDate})</li>`
           )
           .join('');
 
