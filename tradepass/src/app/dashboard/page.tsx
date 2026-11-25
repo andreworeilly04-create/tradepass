@@ -39,8 +39,9 @@ import {
 import { db, auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 
-const MAX_DATA_IMAGE_BYTES = 450 * 1024; // ~450 KB per image
-const MAX_TOTAL_DOC_DATA_CHARS = 750 * 1024; // Stay safely under Firestore's 1 MiB document limit
+const MAX_RAW_INPUT_BYTES = 8 * 1024 * 1024; // Allow up to 8 MB raw photos/screenshots before auto-compression
+const MAX_COMPRESSED_DATA_URL_CHARS = 180 * 1024; // ~180 KB per compressed certificate image
+const MAX_TOTAL_DOC_DATA_CHARS = 800 * 1024; // Stay safely under Firestore's 1 MiB document limit
 const DEFAULT_TIME_ZONE = 'America/New_York';
 
 interface UserProfile {
@@ -211,25 +212,82 @@ async function openCertificateInNewTab(safeUrl: string): Promise<void> {
 function readImageFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith('image/')) {
-      reject(new Error('Only image files or pasted screenshots can be saved directly without cloud storage.'));
+      reject(
+        new Error(
+          'Only image files or pasted screenshots can be saved directly without cloud storage.'
+        )
+      );
       return;
     }
 
-    if (file.size > MAX_DATA_IMAGE_BYTES) {
-      reject(new Error('Image is too large for Firestore (max ~450 KB per image). Please crop or resize it first.'));
+    if (file.size > MAX_RAW_INPUT_BYTES) {
+      reject(new Error('Image file is larger than 8 MB. Please choose a smaller file.'));
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-      } else {
-        reject(new Error('Could not read image data.'));
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      try {
+        URL.revokeObjectURL(objectUrl);
+
+        // Scale down large screenshots/photos while keeping text & cert numbers crisp
+        const MAX_DIMENSION = 1200;
+        let { width, height } = img;
+
+        if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+          if (width >= height) {
+            height = Math.round((height * MAX_DIMENSION) / width);
+            width = MAX_DIMENSION;
+          } else {
+            width = Math.round((width * MAX_DIMENSION) / height);
+            height = MAX_DIMENSION;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Could not initialize image compressor.'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Iteratively compress as JPEG until well under per-certificate budget
+        let quality = 0.78;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+        while (dataUrl.length > MAX_COMPRESSED_DATA_URL_CHARS && quality > 0.35) {
+          quality -= 0.1;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+
+        if (dataUrl.length > MAX_COMPRESSED_DATA_URL_CHARS) {
+          reject(
+            new Error(
+              'Certificate image is still too dense after compression. Please crop closer to the card.'
+            )
+          );
+          return;
+        }
+
+        resolve(dataUrl);
+      } catch (err) {
+        reject(err);
       }
     };
-    reader.onerror = () => reject(new Error('Failed to read image from clipboard or file.'));
-    reader.readAsDataURL(file);
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Failed to decode image from clipboard or file.'));
+    };
+
+    img.src = objectUrl;
   });
 }
 
@@ -305,7 +363,7 @@ function sanitizeCertificatesForSave(drafts: WorkerCertificate[]): WorkerCertifi
       const cleanNumber = (cert.certNumber || '').trim();
       const cleanExpDate = (cert.expDate || '').trim();
       const cleanFileName = safeUrl
-        ? cert.fileName || 'certificate-screenshot.png'
+        ? cert.fileName || 'certificate-screenshot.jpg'
         : null;
 
       return {
@@ -627,7 +685,7 @@ export default function DashboardPage() {
         const file = item.getAsFile();
         if (file) {
           e.preventDefault();
-          const generatedName = `pasted-certificate-${Date.now()}.${item.type.split('/')[1] || 'png'}`;
+          const generatedName = `pasted-certificate-${Date.now()}.jpg`;
           const namedFile = new File([file], generatedName, { type: file.type });
           const targetIndex = Math.min(activeAddCertIndex, addCertificates.length - 1);
           await handleAddImageSelect(targetIndex, namedFile);
@@ -690,7 +748,7 @@ export default function DashboardPage() {
         const file = item.getAsFile();
         if (file) {
           e.preventDefault();
-          const generatedName = `pasted-certificate-${Date.now()}.${item.type.split('/')[1] || 'png'}`;
+          const generatedName = `pasted-certificate-${Date.now()}.jpg`;
           const namedFile = new File([file], generatedName, { type: file.type });
           const targetIndex = Math.min(activeEditCertIndex, editCertificates.length - 1);
           await handleEditImageSelect(targetIndex, namedFile);
@@ -718,7 +776,7 @@ export default function DashboardPage() {
     );
 
     if (totalPayloadSize > MAX_TOTAL_DOC_DATA_CHARS) {
-      setFormError('Combined certificate images are too large for a single Firestore profile (~750 KB max). Please use smaller screenshots.');
+      setFormError('Combined certificate images exceed Firestore profile limit (~800 KB max). Please remove or crop one of the screenshots.');
       return;
     }
 
@@ -785,7 +843,7 @@ export default function DashboardPage() {
     );
 
     if (totalPayloadSize > MAX_TOTAL_DOC_DATA_CHARS) {
-      setEditFormError('Combined certificate images are too large for a single Firestore profile (~750 KB max). Please use smaller screenshots.');
+      setEditFormError('Combined certificate images exceed Firestore profile limit (~800 KB max). Please remove or crop one of the screenshots.');
       return;
     }
 
