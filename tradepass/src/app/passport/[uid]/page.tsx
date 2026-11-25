@@ -3,7 +3,14 @@
 import React, { useEffect, useState, use } from 'react';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { CheckCircle2, Clock, AlertTriangle, ShieldCheck } from 'lucide-react';
+import {
+  CheckCircle2,
+  Clock,
+  AlertTriangle,
+  ShieldCheck,
+  X,
+  Maximize2,
+} from 'lucide-react';
 
 const DEFAULT_TIME_ZONE = 'America/New_York';
 
@@ -33,6 +40,14 @@ interface Worker {
   certificates?: WorkerCertificate[];
   oshaCertNumber?: string;
   oshaExpDate?: string;
+}
+
+interface LightboxPreview {
+  workerName: string;
+  certLabel: string;
+  certNumber?: string;
+  expDate?: string;
+  imageUrl: string;
 }
 
 function getSafeTimeZone(timeZone?: string | null): string {
@@ -103,6 +118,22 @@ function getComplianceStatus(
   return 'Compliant';
 }
 
+function getSafeImageUrl(rawUrl?: string | null): string | null {
+  if (!rawUrl) return null;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+
+  if (
+    trimmed.startsWith('data:image/') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('http://')
+  ) {
+    return trimmed;
+  }
+
+  return null;
+}
+
 function normalizeWorkerCertificates(data: any): WorkerCertificate[] {
   if (Array.isArray(data?.certificates) && data.certificates.length > 0) {
     return data.certificates.map((cert: any, idx: number) => ({
@@ -117,7 +148,8 @@ function normalizeWorkerCertificates(data: any): WorkerCertificate[] {
 
   const hasLegacyData =
     (data?.oshaCertNumber && data.oshaCertNumber !== 'N/A') ||
-    Boolean(data?.oshaExpDate);
+    Boolean(data?.oshaExpDate) ||
+    Boolean(data?.fileUrl);
 
   if (hasLegacyData) {
     return [
@@ -129,6 +161,8 @@ function normalizeWorkerCertificates(data: any): WorkerCertificate[] {
             ? data.oshaCertNumber
             : '',
         expDate: data.oshaExpDate || '',
+        fileName: data.fileName || null,
+        fileUrl: data.fileUrl || null,
       },
     ];
   }
@@ -163,6 +197,7 @@ export default function PublicPassportPage({
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lightbox, setLightbox] = useState<LightboxPreview | null>(null);
 
   useEffect(() => {
     async function fetchPublicPassportData() {
@@ -176,10 +211,6 @@ export default function PublicPassportPage({
           profileData = userSnap.data() as UserProfile;
           setProfile(profileData);
         }
-
-        const tz = getSafeTimeZone(
-          profileData?.timeZone || profileData?.timezone
-        );
 
         const workersSnap = await getDocs(
           collection(db, 'users', uid, 'workers')
@@ -199,8 +230,6 @@ export default function PublicPassportPage({
           });
         });
 
-        // Pre-sort or keep deterministic order; status is computed per tz below
-        void tz;
         setWorkers(list);
       } catch (err) {
         console.error('Error fetching public passport roster:', err);
@@ -309,47 +338,81 @@ export default function PublicPassportPage({
                             No certificates on file
                           </span>
                         ) : (
-                          <div className="space-y-2">
+                          <div className="space-y-2.5">
                             {certs.map((cert, idx) => {
                               const certStatus = getComplianceStatus(
                                 cert.expDate,
                                 activeTimeZone
                               );
+                              const safeImageUrl = getSafeImageUrl(cert.fileUrl);
+                              const certTitle =
+                                cert.label || `Certificate #${idx + 1}`;
 
                               return (
                                 <div
                                   key={cert.id || idx}
-                                  className="bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-2 text-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5"
+                                  className="bg-slate-950/70 border border-slate-800/80 rounded-lg px-3 py-2.5 text-xs space-y-2"
                                 >
-                                  <div className="space-y-0.5">
-                                    <div className="font-semibold text-white">
-                                      {cert.label || `Certificate #${idx + 1}`}
-                                      {cert.certNumber && (
-                                        <span className="ml-2 font-mono text-[11px] text-slate-400 font-normal">
-                                          #{cert.certNumber}
-                                        </span>
-                                      )}
+                                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5">
+                                    <div className="space-y-0.5">
+                                      <div className="font-semibold text-white">
+                                        {certTitle}
+                                        {cert.certNumber && (
+                                          <span className="ml-2 font-mono text-[11px] text-slate-400 font-normal">
+                                            #{cert.certNumber}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-slate-400">
+                                        Exp: {formatDateString(cert.expDate)}
+                                      </div>
                                     </div>
-                                    <div className="text-[11px] text-slate-400">
-                                      Exp: {formatDateString(cert.expDate)}
-                                    </div>
+
+                                    <span
+                                      className={`self-start sm:self-center text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
+                                        certStatus === 'Compliant'
+                                          ? 'bg-emerald-950/70 text-emerald-400 border-emerald-800/60'
+                                          : certStatus === 'Warning'
+                                          ? 'bg-amber-950/70 text-amber-400 border-amber-800/60'
+                                          : 'bg-rose-950/70 text-rose-400 border-rose-800/60'
+                                      }`}
+                                    >
+                                      {certStatus === 'Compliant'
+                                        ? 'Cleared'
+                                        : certStatus === 'Warning'
+                                        ? 'Expires Soon'
+                                        : 'Expired'}
+                                    </span>
                                   </div>
 
-                                  <span
-                                    className={`self-start sm:self-center text-[11px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${
-                                      certStatus === 'Compliant'
-                                        ? 'bg-emerald-950/70 text-emerald-400 border-emerald-800/60'
-                                        : certStatus === 'Warning'
-                                        ? 'bg-amber-950/70 text-amber-400 border-amber-800/60'
-                                        : 'bg-rose-950/70 text-rose-400 border-rose-800/60'
-                                    }`}
-                                  >
-                                    {certStatus === 'Compliant'
-                                      ? 'Cleared'
-                                      : certStatus === 'Warning'
-                                      ? 'Expires Soon'
-                                      : 'Expired'}
-                                  </span>
+                                  {safeImageUrl && (
+                                    <div className="pt-1.5 border-t border-slate-800/70">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setLightbox({
+                                            workerName: w.name,
+                                            certLabel: certTitle,
+                                            certNumber: cert.certNumber,
+                                            expDate: cert.expDate,
+                                            imageUrl: safeImageUrl,
+                                          })
+                                        }
+                                        className="group relative inline-flex items-center gap-2.5 text-left cursor-pointer"
+                                        title="Click to view full-size certificate image"
+                                      >
+                                        <img
+                                          src={safeImageUrl}
+                                          alt={`${w.name} - ${certTitle}`}
+                                          className="h-16 w-24 rounded-md object-cover border border-slate-700 bg-slate-900 group-hover:border-blue-400 transition"
+                                        />
+                                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-400 group-hover:text-blue-300">
+                                          <Maximize2 className="w-3.5 h-3.5 shrink-0" />
+                                          <span>View Certificate</span>
+                                        </span>
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -385,6 +448,57 @@ export default function PublicPassportPage({
         </div>
 
       </div>
+
+      {/* Full-Size Certificate Image Lightbox */}
+      {lightbox && (
+        <div
+          onClick={() => setLightbox(null)}
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 max-w-2xl w-full shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h2 className="text-base sm:text-lg font-bold text-white">
+                  {lightbox.workerName} — {lightbox.certLabel}
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {lightbox.certNumber ? `Cert #${lightbox.certNumber} • ` : ''}
+                  Expires: {formatDateString(lightbox.expDate)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLightbox(null)}
+                className="text-slate-400 hover:text-white cursor-pointer p-1"
+                aria-label="Close certificate preview"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-center">
+              <img
+                src={lightbox.imageUrl}
+                alt={`${lightbox.workerName} - ${lightbox.certLabel}`}
+                className="max-h-[65vh] w-auto max-w-full rounded-lg object-contain"
+              />
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setLightbox(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
