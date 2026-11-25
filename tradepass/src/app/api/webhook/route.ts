@@ -6,7 +6,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2026-10-28.endive' as any,
+  apiVersion: '2026-11-18.endive' as any,
 });
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
