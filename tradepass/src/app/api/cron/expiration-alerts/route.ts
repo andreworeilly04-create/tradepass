@@ -6,7 +6,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 const FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL ||
-  'TradePass Compliance <onboarding@resend.dev>';
+  'TradePass Compliance <alerts@tradepasscheck.com>';
 
 const DEFAULT_TIMEZONE = process.env.DEFAULT_TIMEZONE || 'America/New_York';
 
@@ -177,6 +177,54 @@ function getAllowedMilestones(userData: FirebaseFirestore.DocumentData): number[
   return [30, 15];
 }
 
+async function getCompanyRecipients(
+  userId: string,
+  userData: FirebaseFirestore.DocumentData,
+  allUserDocs: FirebaseFirestore.QueryDocumentSnapshot[]
+): Promise<string[]> {
+  const recipientSet = new Set<string>();
+
+  const addEmail = (val: unknown) => {
+    if (typeof val === 'string' && val.trim()) {
+      recipientSet.add(val.trim().toLowerCase());
+    }
+  };
+
+  // 1. Primary company owner email
+  addEmail(userData.email);
+
+  // 2. Direct foreman fields on the owner document
+  addEmail(userData.foremanEmail);
+  if (Array.isArray(userData.foremanEmails)) {
+    userData.foremanEmails.forEach(addEmail);
+  }
+
+  // 3. Subcollections under users/{userId} (members or foremen)
+  const [membersSnap, foremenSnap] = await Promise.all([
+    adminDb.collection('users').doc(userId).collection('members').get(),
+    adminDb.collection('users').doc(userId).collection('foremen').get(),
+  ]);
+
+  membersSnap.forEach((doc) => addEmail(doc.data().email));
+  foremenSnap.forEach((doc) => addEmail(doc.data().email));
+
+  // 4. Separate top-level user docs linked to this owner/company
+  for (const otherDoc of allUserDocs) {
+    if (otherDoc.id === userId) continue;
+    const other = otherDoc.data();
+    if (
+      other.ownerId === userId ||
+      other.companyId === userId ||
+      other.adminId === userId ||
+      other.parentUserId === userId
+    ) {
+      addEmail(other.email);
+    }
+  }
+
+  return Array.from(recipientSet);
+}
+
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${process.env.CRON_SECRET_KEY}`) {
@@ -200,7 +248,13 @@ export async function GET(request: Request) {
       const allowedMilestones = getAllowedMilestones(userData);
       const hasPublicPassport = allowedMilestones.includes(7);
 
-      if (!userEmail) continue;
+      const recipients = await getCompanyRecipients(
+        userId,
+        userData,
+        usersSnapshot.docs
+      );
+
+      if (recipients.length === 0) continue;
 
       const workersSnapshot = await adminDb
         .collection('users')
@@ -303,7 +357,7 @@ export async function GET(request: Request) {
 
         const { error } = await resend.emails.send({
           from: FROM_EMAIL,
-          to: userEmail,
+          to: recipients,
           subject: `${subjectPrefix} ${workers.length} worker credential(s) expiring in ${timeframeText}`,
           html: `
             <div style="font-family: Arial, sans-serif; color: #0f172a; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
@@ -314,7 +368,9 @@ export async function GET(request: Request) {
                 ${listHtml}
               </ul>
               <p style="margin-top: 20px; font-size: 13px; color: #334155;">
-                To update certifications, sign in to <a href="${dashboardUrl}" style="color: #2563eb; font-weight: bold;">${dashboardUrl}</a> using <strong>${userEmail}</strong>.
+                To update certifications, sign in to <a href="${dashboardUrl}" style="color: #2563eb; font-weight: bold;">${dashboardUrl}</a>${
+            userEmail ? ` using <strong>${userEmail}</strong>` : ''
+          }.
               </p>
               ${passportFooterHtml}
             </div>
@@ -322,7 +378,7 @@ export async function GET(request: Request) {
         });
 
         if (error) {
-          console.error(`Resend error for ${userEmail}:`, error);
+          console.error(`Resend error for ${recipients.join(', ')}:`, error);
           throw new Error(error.message);
         }
 
