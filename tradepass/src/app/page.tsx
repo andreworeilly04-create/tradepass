@@ -108,7 +108,7 @@ export default function HomePage() {
               </div>
               <h3 className="text-base sm:text-lg font-semibold text-white">Job-Site Foreman Accounts</h3>
               <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                Authorize field supervisors and site foremen to check crew clearance on the spot before anyone steps onto a restricted commercial site.
+                Authorize field foremen to log in, view worker compliance status and certificates, and receive automated expiration alerts.
               </p>
             </article>
 
@@ -237,7 +237,7 @@ export default function HomePage() {
                 </li>
                 <li className="flex items-start space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                  <span>Multiple Foreman Accounts</span>
+                  <span>Foreman Accounts (Compliance View & Alerts)</span>
                 </li>
                 <li className="flex items-start space-x-3">
                   <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />

@@ -70,7 +70,6 @@ function parseLocalDate(rawInput: unknown, timeZone: string): Date | null {
 
   if (normalized instanceof Date) {
     if (Number.isNaN(normalized.getTime())) return null;
-    // If stored as a Date/Timestamp, extract calendar day in the user's timezone
     return getStartOfDayInTimeZone(normalized, timeZone);
   }
 
@@ -190,16 +189,12 @@ async function getCompanyRecipients(
     }
   };
 
-  // 1. Primary company owner email
   addEmail(userData.email);
-
-  // 2. Direct foreman fields on the owner document
   addEmail(userData.foremanEmail);
   if (Array.isArray(userData.foremanEmails)) {
     userData.foremanEmails.forEach(addEmail);
   }
 
-  // 3. Subcollections under users/{userId} (members or foremen)
   const [membersSnap, foremenSnap] = await Promise.all([
     adminDb.collection('users').doc(userId).collection('members').get(),
     adminDb.collection('users').doc(userId).collection('foremen').get(),
@@ -208,7 +203,6 @@ async function getCompanyRecipients(
   membersSnap.forEach((doc) => addEmail(doc.data().email));
   foremenSnap.forEach((doc) => addEmail(doc.data().email));
 
-  // 4. Separate top-level user docs linked to this owner/company
   for (const otherDoc of allUserDocs) {
     if (otherDoc.id === userId) continue;
     const other = otherDoc.data();
@@ -227,7 +221,7 @@ async function getCompanyRecipients(
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!process.env.CRON_SECRET || authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -246,7 +240,6 @@ export async function GET(request: Request) {
       const userTimeZone = getSafeTimeZone(userData);
       const today = getStartOfDayInTimeZone(now, userTimeZone);
       const allowedMilestones = getAllowedMilestones(userData);
-      const hasPublicPassport = allowedMilestones.includes(7);
 
       const recipients = await getCompanyRecipients(
         userId,
@@ -316,11 +309,6 @@ export async function GET(request: Request) {
         }
       });
 
-      const appUrl =
-        process.env.NEXT_PUBLIC_APP_URL || 'https://tradepass-nine.vercel.app';
-      const dashboardUrl = `${appUrl}/dashboard`;
-      const passportUrl = `${appUrl}/passport/${userId}`;
-
       const sendAlertEmail = async (
         workers: Array<{
           name: string;
@@ -349,12 +337,6 @@ export async function GET(request: Request) {
           ? `This is a final reminder that the following worker certification(s) expire in <strong>${timeframeText}</strong>:`
           : `This is an automated reminder that the following worker certification(s) are scheduled to expire in <strong>${timeframeText}</strong>:`;
 
-        const passportFooterHtml = hasPublicPassport
-          ? `<p style="margin-top: 10px; font-size: 12px; color: #64748b;">
-               Public GC Roster Link (Read-Only): <a href="${passportUrl}" style="color: #2563eb;">${passportUrl}</a>
-             </p>`
-          : '';
-
         const { error } = await resend.emails.send({
           from: FROM_EMAIL,
           to: recipients,
@@ -368,11 +350,10 @@ export async function GET(request: Request) {
                 ${listHtml}
               </ul>
               <p style="margin-top: 20px; font-size: 13px; color: #334155;">
-                To update certifications, sign in to <a href="${dashboardUrl}" style="color: #2563eb; font-weight: bold;">${dashboardUrl}</a>${
-            userEmail ? ` using <strong>${userEmail}</strong>` : ''
-          }.
+                Please sign in to TradePass${
+                  userEmail ? ` (${userEmail})` : ''
+                } whenever you're ready to review and update worker certifications.
               </p>
-              ${passportFooterHtml}
             </div>
           `,
         });
