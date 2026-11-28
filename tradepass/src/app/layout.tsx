@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'TradePass | Subcontractor Compliance & Job-Site Safety Tracking',
     description: 'Keep your entire crew 100% job-site compliant with automated email expiration alerts, multi-foreman accounts, and custom-branded GC clearance passports.',
-    url: 'https://gettradepass.com',
+    url: 'https://www.tradepasscheck.com',
     siteName: 'TradePass',
     type: 'website',
   },
