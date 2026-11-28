@@ -2035,7 +2035,7 @@ export default function DashboardPage() {
               </header>
 
               <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-                Enterprise plan allows authorized field foremen to log in, view compliance status, and submit worker documents.
+                Enterprise plan allows authorized field foremen to log in, view worker compliance status and certificates, and receive automated expiration alerts.
               </p>
 
               <form onSubmit={handleAddForeman} className="flex gap-2 mb-4">
